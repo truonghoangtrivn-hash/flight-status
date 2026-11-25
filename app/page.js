@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
-// Bảng từ điển mã hãng bay phổ biến tại Tân Sơn Nhất (SGN)
+// Bảng từ điển mã hãng bay
 const AIRLINE_DICT = {
   VN: "VIETNAM AIRLINES",
   "0V": "VASCO",
@@ -35,9 +35,6 @@ const AIRLINE_DICT = {
   TR: "SCOOT",
   AK: "AIRASIA",
   FD: "THAI AIRASIA",
-  MH: "MALAYSIA AIRLINES",
-  PG: "BANGKOK AIRWAYS",
-  MF: "XIAMEN AIR",
 };
 
 function resolveAirlineName(flightNo = "", existingAirline = "") {
@@ -50,6 +47,18 @@ function resolveAirlineName(flightNo = "", existingAirline = "") {
   return "-";
 }
 
+// Chuẩn hóa tên sân bay sang chữ hoa không dấu
+function cleanAirportName(name = "") {
+  if (!name) return "";
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toUpperCase()
+    .trim();
+}
+
 export default function FlightDashboard() {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +66,6 @@ export default function FlightDashboard() {
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
-  // Mặc định ngày hôm nay
   const todayStr = useMemo(() => {
     return new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Ho_Chi_Minh",
@@ -65,16 +73,12 @@ export default function FlightDashboard() {
   }, []);
 
   const [filterDate, setFilterDate] = useState(todayStr);
-
-  // Bộ lọc theo nút bấm: Mặc định là DEP và DOM
   const [filterTrip, setFilterTrip] = useState("D");       // "D" (DEP) hoặc "A" (ARR)
   const [filterStation, setFilterStation] = useState("DOM"); // "DOM" hoặc "INT" (INTL)
   const [filterAirline, setFilterAirline] = useState("ALL"); // "ALL" hoặc "VNA"
-
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // 1. Lắng nghe trạng thái cập nhật thời gian thực
   useEffect(() => {
     const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
       if (docSnap.exists()) {
@@ -94,7 +98,6 @@ export default function FlightDashboard() {
     return () => unsubMeta();
   }, []);
 
-  // 2. Lắng nghe danh sách chuyến bay theo ngày từ Firebase Firestore
   useEffect(() => {
     setLoading(true);
     const q = query(collection(db, "flights_sgn"), where("date", "==", filterDate));
@@ -102,24 +105,82 @@ export default function FlightDashboard() {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const list = [];
+        const rawList = [];
         snapshot.forEach((doc) => {
-          list.push(doc.data());
+          rawList.push(doc.data());
         });
 
-        // Sắp xếp thứ tự: Ưu tiên giờ Scheduled (ST)
-        list.sort((a, b) => {
-          if (a.st === b.st) {
-            return (a.sortOrder || 0) - (b.sortOrder || 0);
+        // THUẬT TOÁN KHỬ TRÙNG LẶP & XỬ LÝ XUNG ĐỘT (SMART DEDUPLICATION)
+        const flightMap = new Map();
+
+        rawList.forEach((item) => {
+          const cleanFlt = (item.flightNo || "").replace(/\s+/g, "").toUpperCase();
+          const cleanSt = (item.st || "").replace(/[^0-9]/g, "");
+          const cleanApt = cleanAirportName(item.airportName);
+
+          // Tạo khóa duy nhất cho chuyến bay: Hướng_MãBay_GiờKếHoạch
+          const uniqueKey = `${item.tripType || "D"}_${cleanFlt}_${cleanSt}`;
+
+          if (!flightMap.has(uniqueKey)) {
+            flightMap.set(uniqueKey, {
+              ...item,
+              flightNo: cleanFlt,
+              airportName: cleanApt,
+            });
+          } else {
+            // Nếu đã có bản ghi trước đó -> Hợp nhất và ưu tiên bản ghi có dữ liệu mới/chuẩn hơn
+            const prev = flightMap.get(uniqueKey);
+            const hasMoreInfo =
+              (item.beltGate && !prev.beltGate) ||
+              (item.terminal && !prev.terminal) ||
+              (item.checkinRow && !prev.checkinRow) ||
+              (item.hasTIAData && !prev.hasTIAData);
+
+            flightMap.set(uniqueKey, {
+              ...prev,
+              ...(hasMoreInfo ? item : {}),
+              flightNo: cleanFlt,
+              airportName: cleanApt || prev.airportName,
+              beltGate: item.beltGate || prev.beltGate,
+              terminal: item.terminal || prev.terminal,
+              checkinRow: item.checkinRow || prev.checkinRow,
+              remark: item.hasTIAData ? item.remark : prev.remark || item.remark,
+              airlines: prev.airlines || item.airlines,
+            });
           }
-          return (a.st || "").localeCompare(b.st || "");
         });
 
-        setFlights(list);
+        // XỬ LÝ LIÊN DANH VASCO (0V) VÀ VIETNAM AIRLINES (VN)
+        // Nếu chuyến 0V80xx đã DEPARTED, hủy bỏ dòng VN80xx bị CANCEL giả tạo
+        const mergedList = Array.from(flightMap.values());
+        const vascoDeparted = new Set();
+
+        mergedList.forEach((f) => {
+          const r = (f.remark || "").toLowerCase();
+          if (f.flightNo.startsWith("0V") && (r.includes("departed") || f.beltGate)) {
+            vascoDeparted.add(`${f.st}_${f.airportName}`);
+          }
+        });
+
+        const finalList = mergedList.filter((f) => {
+          const r = (f.remark || "").toLowerCase();
+          // Nếu là chuyến VN trùng giờ và điểm đến với chuyến 0V đã bay, nhưng lại bị báo CANCEL -> loại bỏ dòng rác này
+          if (f.flightNo.startsWith("VN") && r.includes("cancel")) {
+            if (vascoDeparted.has(`${f.st}_${f.airportName}`)) {
+              return false;
+            }
+          }
+          return true;
+        });
+
+        // Sắp xếp thứ tự theo Giờ kế hoạch (ST)
+        finalList.sort((a, b) => (a.st || "").localeCompare(b.st || ""));
+
+        setFlights(finalList);
         setLoading(false);
       },
       (error) => {
-        console.error("Lỗi đọc dữ liệu Firestore:", error);
+        console.error("Lỗi đọc Firestore:", error);
         setLoading(false);
       }
     );
@@ -127,7 +188,6 @@ export default function FlightDashboard() {
     return () => unsubscribe();
   }, [filterDate]);
 
-  // 3. Hàm kích hoạt cào dữ liệu từ VIAGS
   const handleTriggerSync = async () => {
     try {
       setSyncing(true);
@@ -148,34 +208,26 @@ export default function FlightDashboard() {
     }
   };
 
-  // 4. Lọc dữ liệu hiển thị trên bảng
   const filteredFlights = useMemo(() => {
     return flights.filter((f) => {
-      // 1. Lọc DEP hoặc ARR
       if (f.tripType !== filterTrip) return false;
-
-      // 2. Lọc DOM hoặc INTL
       if (f.stationType !== filterStation) return false;
 
-      // Tính toán tên hãng
       const airlineName = resolveAirlineName(f.flightNo, f.airlines);
 
-      // 3. Lọc VNA hoặc ALL
       if (filterAirline === "VNA") {
         const isVna =
           airlineName.includes("VIETNAM AIRLINES") ||
-          (f.flightNo || "").replace(/\s+/g, "").toUpperCase().startsWith("VN");
+          f.flightNo.startsWith("VN");
         if (!isVna) return false;
       }
 
-      // 4. Lọc khung giờ
       if (filterTime !== "all") {
         const [start, end] = filterTime.split("-");
         const flightTime = (f.st || "").replace(":", "");
         if (flightTime < start || flightTime > end) return false;
       }
 
-      // 5. Tìm kiếm nhanh
       if (searchTerm.trim() !== "") {
         const term = searchTerm.toLowerCase();
         const matchFlt = (f.flightNo || "").toLowerCase().includes(term);
@@ -188,7 +240,6 @@ export default function FlightDashboard() {
     });
   }, [flights, filterTrip, filterStation, filterAirline, filterTime, searchTerm]);
 
-  // Màu sắc cho trạng thái (Remarks)
   const getBadgeClass = (remark = "") => {
     const r = remark.toLowerCase();
     if (r.includes("cancel") || r.includes("hủy")) return "badge badge-cancel";
@@ -201,10 +252,9 @@ export default function FlightDashboard() {
 
   return (
     <div className="container">
-      {/* Header */}
       <div className="header-box">
         <div className="header-title">
-          <h1>Flight Information - Tân Sơn Nhất (SGN)</h1>
+          <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
           <p>
             Lịch trình bay cập nhật liên tục • Tích hợp VIAGS & TIA FIDS
             {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
@@ -240,9 +290,8 @@ export default function FlightDashboard() {
         </div>
       )}
 
-      {/* Khung Bộ Lọc & Các Nút Chuyển Đổi */}
+      {/* Khung Bộ Lọc */}
       <div className="filter-card">
-        {/* Nhóm 1: DEP / ARR */}
         <div className="form-group">
           <label>Chuyến bay</label>
           <div className="filter-btn-group">
@@ -261,7 +310,6 @@ export default function FlightDashboard() {
           </div>
         </div>
 
-        {/* Nhóm 2: DOM / INTL */}
         <div className="form-group">
           <label>Tuyến bay</label>
           <div className="filter-btn-group">
@@ -280,7 +328,6 @@ export default function FlightDashboard() {
           </div>
         </div>
 
-        {/* Nhóm 3: ALL / VNA */}
         <div className="form-group">
           <label>Hãng bay</label>
           <div className="filter-btn-group">
@@ -299,7 +346,6 @@ export default function FlightDashboard() {
           </div>
         </div>
 
-        {/* Ngày */}
         <div className="form-group">
           <label>Date</label>
           <input
@@ -310,7 +356,6 @@ export default function FlightDashboard() {
           />
         </div>
 
-        {/* Khung giờ */}
         <div className="form-group">
           <label>Time</label>
           <select
@@ -328,7 +373,6 @@ export default function FlightDashboard() {
           </select>
         </div>
 
-        {/* Tìm kiếm */}
         <div className="form-group" style={{ flex: 1, minWidth: "180px" }}>
           <label>Tìm kiếm</label>
           <input
@@ -341,10 +385,9 @@ export default function FlightDashboard() {
         </div>
       </div>
 
-      {/* Thống kê */}
       <div className="stats-bar">
         <span>
-          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
+          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay (Đã lọc trùng lặp & xử lý xung đột)
         </span>
       </div>
 
@@ -377,7 +420,7 @@ export default function FlightDashboard() {
               filteredFlights.map((item) => {
                 const airlineName = resolveAirlineName(item.flightNo, item.airlines);
                 return (
-                  <tr key={item.id}>
+                  <tr key={`${item.flightNo}_${item.st}`}>
                     {/* Cột 1: Flights */}
                     <td className="flight-no">{item.flightNo}</td>
 
@@ -392,10 +435,10 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Destination hoặc From */}
+                    {/* Cột 4: Destination/From chữ in hoa không dấu chuẩn quốc tế */}
                     <td className="airport-name">{item.airportName}</td>
 
-                    {/* Cột 5: Gate hoặc Baggage kèm Nhà ga & Quầy (từ TIA) */}
+                    {/* Cột 5: Gate/Baggage */}
                     <td>
                       <div>
                         {item.beltGate ? (
