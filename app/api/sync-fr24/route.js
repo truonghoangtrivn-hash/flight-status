@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, writeBatch, doc } from "firebase/firestore";
+import { collection, query, where, getDocs, writeBatch } from "firebase/firestore";
 
 export const maxDuration = 30;
 export const dynamic = "force-dynamic";
@@ -14,6 +14,17 @@ function formatVnTime(timestampSec) {
     minute: "2-digit",
     hour12: false,
   });
+}
+
+function getVnDateFromTimestamp(timestampSec) {
+  if (!timestampSec) return null;
+  const d = new Date(timestampSec * 1000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
 
 function getNextDayStr(dateStr) {
@@ -39,7 +50,7 @@ async function handleSyncFR24(request) {
 
     const nextDateVn = getNextDayStr(todayVn);
 
-    // 1. Gọi trực tiếp cổng dữ liệu JSON của Flightradar24 cho các chuyến đến SGN
+    // 1. Gọi trực tiếp API Flightradar24
     const frRes = await fetch(
       "https://api.flightradar24.com/common/v1/airport.json?code=sgn&plugin[]=&plugin-setting[schedule][mode]=arrivals&page=1&limit=100",
       {
@@ -62,7 +73,8 @@ async function handleSyncFR24(request) {
     const arrivals =
       json?.result?.response?.airport?.pluginData?.schedule?.arrivals?.data || [];
 
-    const fr24Map = new Map();
+    // Lưu dữ liệu FR24 theo khóa: Ngày_MãChuyếnBay (Ví dụ: "2026-11-25_VN221")
+    const fr24ExactMap = new Map();
 
     arrivals.forEach((item) => {
       const flt = item.flight;
@@ -76,18 +88,26 @@ async function handleSyncFR24(request) {
         etaSec = flt.time.real.arrival;
       }
 
+      // Xác định chính xác NGÀY đến thực tế từ radar của FR24
+      const scheduledSec = flt.time?.scheduled?.arrival || etaSec;
+      const flightArrivalDate = getVnDateFromTimestamp(scheduledSec || etaSec);
+
       const etaFormatted = formatVnTime(etaSec);
-      if (flightNo && etaFormatted) {
-        fr24Map.set(flightNo, {
+
+      if (flightNo && flightArrivalDate && etaFormatted) {
+        // Khóa khớp chuẩn xác: Ngày_MãChuyếnBay
+        const exactKey = `${flightArrivalDate}_${flightNo}`;
+        fr24ExactMap.set(exactKey, {
           eta: etaFormatted,
           status: flt.status?.text || "",
+          date: flightArrivalDate,
         });
       }
     });
 
-    console.log(`[FR24 Fast-Sync] Đã lấy dữ liệu radar của ${fr24Map.size} chuyến bay đến`);
+    console.log(`[FR24 Fast-Sync] Đã bóc tách ${fr24ExactMap.size} chuyến bay theo đúng ngày thực tế`);
 
-    // 2. Tìm các chuyến bay đến trong ca trực từ Firestore để cập nhật
+    // 2. Tìm các chuyến bay đến trong Firestore để cập nhật và dọn dẹp dữ liệu nhầm
     const arrivalSnap = await getDocs(
       query(
         collection(db, "flights_sgn"),
@@ -97,14 +117,20 @@ async function handleSyncFR24(request) {
     );
 
     let updatedCount = 0;
+    let clearedCount = 0;
     const batch = writeBatch(db);
 
     arrivalSnap.forEach((docSnap) => {
       const flightData = docSnap.data();
       const cleanFlt = (flightData.flightNo || "").replace(/\s+/g, "").toUpperCase();
+      const docDate = flightData.date; // Ngày lưu của chuyến bay (25-Nov hoặc 26-Nov)
 
-      if (fr24Map.has(cleanFlt)) {
-        const info = fr24Map.get(cleanFlt);
+      // Khóa đối soát chính xác theo cả Ngày và Mã bay
+      const exactKey = `${docDate}_${cleanFlt}`;
+
+      if (fr24ExactMap.has(exactKey)) {
+        // Đúng ngày và đúng chuyến -> Cập nhật giờ radar
+        const info = fr24ExactMap.get(exactKey);
         batch.set(
           docSnap.ref,
           {
@@ -115,6 +141,17 @@ async function handleSyncFR24(request) {
           { merge: true }
         );
         updatedCount++;
+      } else if (flightData.fr24ETA) {
+        // Sai ngày (ví dụ chuyến 26-Nov bị gán nhầm giờ của 25-Nov trước đó) -> TỰ ĐỘNG XÓA BỎ DỮ LIỆU NHẦM!
+        batch.set(
+          docSnap.ref,
+          {
+            fr24ETA: null,
+            fr24Status: null,
+          },
+          { merge: true }
+        );
+        clearedCount++;
       }
     });
 
@@ -124,7 +161,7 @@ async function handleSyncFR24(request) {
       metaRef,
       {
         lastFR24Sync: new Date().toISOString(),
-        fr24LiveCount: fr24Map.size,
+        fr24LiveCount: fr24ExactMap.size,
       },
       { merge: true }
     );
@@ -133,9 +170,10 @@ async function handleSyncFR24(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã cập nhật giờ radar Flightradar24 cho ${updatedCount} chuyến bay đến!`,
-      totalFR24: fr24Map.size,
+      message: `Đã cập nhật đúng ${updatedCount} chuyến bay và dọn sạch ${clearedCount} chuyến bị gán nhầm ngày!`,
+      totalFR24: fr24ExactMap.size,
       updatedInFirestore: updatedCount,
+      clearedWrongDates: clearedCount,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
