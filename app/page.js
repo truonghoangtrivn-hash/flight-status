@@ -5,7 +5,7 @@ import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { RefreshCw } from "lucide-react";
 
-// Bảng từ điển mã hãng bay
+// Bảng từ điển Hãng bay
 const AIRLINE_DICT = {
   VN: "VIETNAM AIRLINES",
   "0V": "VASCO",
@@ -37,6 +37,121 @@ const AIRLINE_DICT = {
   FD: "THAI AIRASIA",
 };
 
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA 3 CHỮ CÁI
+const IATA_MAP = {
+  // Sân bay nội địa Việt Nam
+  "HA NOI": "HAN",
+  HANOI: "HAN",
+  "NOI BAI": "HAN",
+  HUE: "HUI",
+  "PHU BAI": "HUI",
+  "THANH HOA": "THD",
+  "THO XUAN": "THD",
+  VINH: "VII",
+  "DA NANG": "DAD",
+  DANANG: "DAD",
+  "HAI PHONG": "HPH",
+  "CAT BI": "HPH",
+  "PHU QUOC": "PQC",
+  PHUQUOC: "PQC",
+  "CAM RANH": "CXR",
+  "NHA TRANG": "CXR",
+  "CON DAO": "VCS",
+  CONDAO: "VCS",
+  PLEIKU: "PXU",
+  "QUY NHON": "UIH",
+  "PHU CAT": "UIH",
+  "BUON ME THUOT": "BMV",
+  "BUON MA THUOT": "BMV",
+  "DA LAT": "DLI",
+  DALAT: "DLI",
+  "LIEN KHUONG": "DLI",
+  "TUY HOA": "TBB",
+  "DONG TAC": "TBB",
+  "CHU LAI": "VCL",
+  "DONG HOI": "VDH",
+  "CA MAU": "CAH",
+  "CAN THO": "VCA",
+  "RACH GIA": "VKG",
+  "DIEN BIEN": "DIN",
+  "VAN DON": "VDO",
+  "QUANG NINH": "VDO",
+
+  // Sân bay quốc tế phổ biến
+  BANGKOK: "BKK",
+  "DON MUEANG": "DMK",
+  SINGAPORE: "SIN",
+  "KUALA LUMPUR": "KUL",
+  SEOUL: "ICN",
+  INCHEON: "ICN",
+  BUSAN: "PUS",
+  TOKYO: "HND",
+  HANEDA: "HND",
+  "HANEDA-TOKYO, JAPAN": "HND",
+  NARITA: "NRT",
+  OSAKA: "KIX",
+  NAGOYA: "NGO",
+  FUKUOKA: "FUK",
+  TAIPEI: "TPE",
+  KAOHSIUNG: "KHH",
+  "HONG KONG": "HKG",
+  MACAU: "MFM",
+  BEIJING: "PKX",
+  "BEIJING, CHINA": "PKX",
+  SHANGHAI: "PVG",
+  GUANGZHOU: "CAN",
+  MUMBAI: "BOM",
+  "MUMBAI, INDIA": "BOM",
+  DELHI: "DEL",
+  BARNAUL: "BAX",
+  SYDNEY: "SYD",
+  MELBOURNE: "MEL",
+  PERTH: "PER",
+  PARIS: "CDG",
+  FRANKFURT: "FRA",
+  LONDON: "LHR",
+  DOHA: "DOH",
+  DUBAI: "DXB",
+  "PHNOM PENH": "PNH",
+  "SIEM REAP": "SAI",
+  VIENTIANE: "VTE",
+  "LUANG PRABANG": "LPQ",
+  MANILA: "MNL",
+  JAKARTA: "CGK",
+  BALI: "DPS",
+};
+
+// Hàm chuyển đổi tên sân bay sang mã IATA 3 chữ cái
+function toIATA(name = "") {
+  if (!name) return "";
+  const clean = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toUpperCase()
+    .trim();
+
+  // Nếu bản thân nó đã là mã 3 chữ cái (ví dụ HAN, DAD)
+  if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) {
+    return clean;
+  }
+
+  // Khớp chính xác trong từ điển
+  if (IATA_MAP[clean]) {
+    return IATA_MAP[clean];
+  }
+
+  // Khớp từ khóa chứa
+  for (const [key, code] of Object.entries(IATA_MAP)) {
+    if (clean.includes(key)) {
+      return code;
+    }
+  }
+
+  return clean; // Nếu chưa có trong từ điển thì giữ nguyên
+}
+
 function resolveAirlineName(flightNo = "", existingAirline = "") {
   if (existingAirline && existingAirline.trim() !== "") {
     return existingAirline.trim();
@@ -47,7 +162,6 @@ function resolveAirlineName(flightNo = "", existingAirline = "") {
   return "-";
 }
 
-// Chuẩn hóa tên sân bay sang chữ hoa không dấu
 function cleanAirportName(name = "") {
   if (!name) return "";
   return name
@@ -73,9 +187,9 @@ export default function FlightDashboard() {
   }, []);
 
   const [filterDate, setFilterDate] = useState(todayStr);
-  const [filterTrip, setFilterTrip] = useState("D");       // "D" (DEP) hoặc "A" (ARR)
-  const [filterStation, setFilterStation] = useState("DOM"); // "DOM" hoặc "INT" (INTL)
-  const [filterAirline, setFilterAirline] = useState("ALL"); // "ALL" hoặc "VNA"
+  const [filterTrip, setFilterTrip] = useState("D");
+  const [filterStation, setFilterStation] = useState("DOM");
+  const [filterAirline, setFilterAirline] = useState("ALL");
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -110,7 +224,7 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
-        // THUẬT TOÁN KHỬ TRÙNG LẶP & XỬ LÝ XUNG ĐỘT (SMART DEDUPLICATION)
+        // Khử trùng lặp thông minh
         const flightMap = new Map();
 
         rawList.forEach((item) => {
@@ -118,7 +232,6 @@ export default function FlightDashboard() {
           const cleanSt = (item.st || "").replace(/[^0-9]/g, "");
           const cleanApt = cleanAirportName(item.airportName);
 
-          // Tạo khóa duy nhất cho chuyến bay: Hướng_MãBay_GiờKếHoạch
           const uniqueKey = `${item.tripType || "D"}_${cleanFlt}_${cleanSt}`;
 
           if (!flightMap.has(uniqueKey)) {
@@ -128,7 +241,6 @@ export default function FlightDashboard() {
               airportName: cleanApt,
             });
           } else {
-            // Nếu đã có bản ghi trước đó -> Hợp nhất và ưu tiên bản ghi có dữ liệu mới/chuẩn hơn
             const prev = flightMap.get(uniqueKey);
             const hasMoreInfo =
               (item.beltGate && !prev.beltGate) ||
@@ -150,8 +262,7 @@ export default function FlightDashboard() {
           }
         });
 
-        // XỬ LÝ LIÊN DANH VASCO (0V) VÀ VIETNAM AIRLINES (VN)
-        // Nếu chuyến 0V80xx đã DEPARTED, hủy bỏ dòng VN80xx bị CANCEL giả tạo
+        // Khử nhiễu liên danh VASCO (0V) / VNA (VN)
         const mergedList = Array.from(flightMap.values());
         const vascoDeparted = new Set();
 
@@ -164,7 +275,6 @@ export default function FlightDashboard() {
 
         const finalList = mergedList.filter((f) => {
           const r = (f.remark || "").toLowerCase();
-          // Nếu là chuyến VN trùng giờ và điểm đến với chuyến 0V đã bay, nhưng lại bị báo CANCEL -> loại bỏ dòng rác này
           if (f.flightNo.startsWith("VN") && r.includes("cancel")) {
             if (vascoDeparted.has(`${f.st}_${f.airportName}`)) {
               return false;
@@ -173,7 +283,6 @@ export default function FlightDashboard() {
           return true;
         });
 
-        // Sắp xếp thứ tự theo Giờ kế hoạch (ST)
         finalList.sort((a, b) => (a.st || "").localeCompare(b.st || ""));
 
         setFlights(finalList);
@@ -214,6 +323,7 @@ export default function FlightDashboard() {
       if (f.stationType !== filterStation) return false;
 
       const airlineName = resolveAirlineName(f.flightNo, f.airlines);
+      const iataCode = toIATA(f.airportName);
 
       if (filterAirline === "VNA") {
         const isVna =
@@ -232,8 +342,9 @@ export default function FlightDashboard() {
         const term = searchTerm.toLowerCase();
         const matchFlt = (f.flightNo || "").toLowerCase().includes(term);
         const matchAirport = (f.airportName || "").toLowerCase().includes(term);
+        const matchIata = iataCode.toLowerCase().includes(term);
         const matchAirline = airlineName.toLowerCase().includes(term);
-        if (!matchFlt && !matchAirport && !matchAirline) return false;
+        if (!matchFlt && !matchAirport && !matchIata && !matchAirline) return false;
       }
 
       return true;
@@ -378,7 +489,7 @@ export default function FlightDashboard() {
           <input
             type="text"
             className="form-control"
-            placeholder="Mã chuyến, điểm đến, hãng..."
+            placeholder="Mã chuyến, HAN, DAD, VNA..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -387,7 +498,7 @@ export default function FlightDashboard() {
 
       <div className="stats-bar">
         <span>
-          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay (Đã lọc trùng lặp & xử lý xung đột)
+          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
         </span>
       </div>
 
@@ -399,7 +510,7 @@ export default function FlightDashboard() {
               <th style={{ width: "120px" }}>Flights</th>
               <th style={{ width: "100px" }}>Scheduled</th>
               <th style={{ width: "100px" }}>Estimated</th>
-              <th>{filterTrip === "D" ? "Destination" : "From"}</th>
+              <th style={{ width: "120px" }}>{filterTrip === "D" ? "Destination" : "From"}</th>
               <th style={{ width: "150px" }}>
                 {filterTrip === "D" ? "Gate" : "Baggage"}
               </th>
@@ -419,6 +530,8 @@ export default function FlightDashboard() {
             ) : filteredFlights.length > 0 ? (
               filteredFlights.map((item) => {
                 const airlineName = resolveAirlineName(item.flightNo, item.airlines);
+                const iataCode = toIATA(item.airportName);
+
                 return (
                   <tr key={`${item.flightNo}_${item.st}`}>
                     {/* Cột 1: Flights */}
@@ -435,8 +548,10 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Destination/From chữ in hoa không dấu chuẩn quốc tế */}
-                    <td className="airport-name">{item.airportName}</td>
+                    {/* Cột 4: Mã sân bay IATA 3 chữ cái chuẩn (HAN, DAD, HUI, THD...) */}
+                    <td className="airport-name" style={{ fontSize: "16px", fontWeight: "800", letterSpacing: "1px" }}>
+                      {iataCode}
+                    </td>
 
                     {/* Cột 5: Gate/Baggage */}
                     <td>
