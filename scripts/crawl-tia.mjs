@@ -131,7 +131,7 @@ async function scrapeTIA(browser, target) {
   }));
 }
 
-// HÀM CÀO DỮ LIỆU FLIGHTRADAR24 DÀNH CHO CHUYẾN BAY ĐẾN SÂN BAY TÂN SƠN NHẤT (SGN ARRIVALS)
+// Cào dữ liệu từ Flightradar24 SGN Arrivals
 async function scrapeFlightradar24(browser) {
   console.log("=== [FLIGHTRADAR24] BẮT ĐẦU CÀO GIỜ DỰ ĐÁP (ETA) TÂN SƠN NHẤT ===");
   const frPage = await browser.newPage();
@@ -142,7 +142,6 @@ async function scrapeFlightradar24(browser) {
   const frMap = new Map();
 
   try {
-    // 1. Thử gọi trực tiếp cổng API JSON của Flightradar24
     await frPage.goto("https://www.flightradar24.com/data/airports/sgn/arrivals", {
       waitUntil: "domcontentloaded",
       timeout: 45000,
@@ -181,7 +180,6 @@ async function scrapeFlightradar24(browser) {
         if (!flt || !flt.identification || !flt.identification.number) return;
         const flightNo = (flt.identification.number.default || "").replace(/\s+/g, "").toUpperCase();
 
-        // Lấy giờ dự đáp (ETA): Ưu tiên estimated arrival, nếu đã hạ cánh thì lấy real arrival
         let etaSec = null;
         if (flt.time && flt.time.estimated && flt.time.estimated.arrival) {
           etaSec = flt.time.estimated.arrival;
@@ -195,8 +193,7 @@ async function scrapeFlightradar24(browser) {
         }
       });
     } else {
-      // 2. Dự phòng: Đọc trực tiếp từ bảng HTML của Flightradar24 nếu API bị chặn
-      console.log("[FR24] Chuyển sang đọc trực tiếp bảng DOM Flightradar24...");
+      console.log("[FR24] Đọc trực tiếp bảng DOM Flightradar24...");
       const tableData = await frPage.evaluate(() => {
         const rows = document.querySelectorAll("table#tbl-datatable tbody tr");
         const list = [];
@@ -206,7 +203,6 @@ async function scrapeFlightradar24(browser) {
           if (fltLink && statusCell) {
             const flight = fltLink.innerText.trim().replace(/\s+/g, "").toUpperCase();
             const text = statusCell.innerText.trim();
-            // Bóc tách giờ (ví dụ "Estimated 23:00" hoặc "Landed 22:50" hoặc "11:00 PM")
             const timeMatch = text.match(/(\d{1,2}:\d{2})/);
             if (flight && timeMatch) {
               list.push({ flight, eta: timeMatch[1] });
@@ -253,8 +249,82 @@ async function main() {
     }
   }
 
-  // 2. Cào giờ dự đáp từ Flightradar24
+  // 2. Cào Flightradar24
   let fr24Map = new Map();
   try {
     fr24Map = await scrapeFlightradar24(browser);
   } catch (err) {
+    console.error("Lỗi cào Flightradar24:", err);
+  }
+
+  await browser.close();
+
+  // 3. Tải các chuyến bay đến hiện có để gắn FR24 ETA
+  console.log("=== ĐỒNG BỘ DỮ LIỆU VÀO FIREBASE FIRESTORE ===");
+  const arrivalSnap = await getDocs(
+    query(collection(db, "flights_sgn"), where("date", "==", todayVn), where("tripType", "==", "A"))
+  );
+
+  const batch = writeBatch(db);
+
+  for (const f of allTIA) {
+    const timeKey = (f.std || "").replace(/[^0-9]/g, "");
+    const docId = `${todayVn}_${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
+    const flightRef = doc(db, "flights_sgn", docId);
+
+    const updateData = {
+      date: todayVn,
+      stationType: f.stationType,
+      tripType: f.tripType,
+      flightNo: f.cleanFlightNo,
+      displayFlightNo: f.displayFlightNo,
+      st: f.std,
+      et: f.etd,
+      airportName: f.normalizedAirport,
+      terminal: f.terminal,
+      checkinRow: f.checkinRow,
+      beltGate: f.beltGate,
+      remark: f.remark,
+      hasTIAData: true,
+      source: "TIA_ACV",
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (f.tripType === "A" && fr24Map.has(f.cleanFlightNo)) {
+      updateData.fr24ETA = fr24Map.get(f.cleanFlightNo);
+    }
+
+    batch.set(flightRef, updateData, { merge: true });
+  }
+
+  arrivalSnap.forEach((docSnap) => {
+    const flightData = docSnap.data();
+    const cleanFlt = (flightData.flightNo || "").replace(/\s+/g, "").toUpperCase();
+
+    if (fr24Map.has(cleanFlt)) {
+      const eta = fr24Map.get(cleanFlt);
+      batch.set(docSnap.ref, { fr24ETA: eta }, { merge: true });
+    }
+  });
+
+  const metaRef = doc(db, "meta", "sync_status");
+  batch.set(
+    metaRef,
+    {
+      lastUpdated: new Date().toISOString(),
+      tiaLastCount: allTIA.length,
+      fr24Count: fr24Map.size,
+      source: "HYBRID (VIAGS + TIA + FLIGHTRADAR24)",
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+  console.log("=== ĐÃ CẬP NHẬT HỢP NHẤT TOÀN DIỆN VÀO FIREBASE THÀNH CÔNG! ===");
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error("Lỗi chương trình:", err);
+  process.exit(1);
+});
