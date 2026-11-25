@@ -37,6 +37,7 @@ function requestViags(url, options = {}) {
       agent: isHttps
         ? new https.Agent({ rejectUnauthorized: false, keepAlive: true })
         : undefined,
+      timeout: 15000,
     };
 
     const req = lib.request(url, reqOptions, (res) => {
@@ -60,6 +61,11 @@ function requestViags(url, options = {}) {
     });
 
     req.on("error", (err) => reject(err));
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("VIAGS request timeout"));
+    });
+
     if (options.body) req.write(options.body);
     req.end();
   });
@@ -81,6 +87,7 @@ export async function POST(request) {
 }
 
 async function handleSync(request) {
+  const startTime = Date.now();
   try {
     const { searchParams } = new URL(request.url);
 
@@ -91,17 +98,16 @@ async function handleSync(request) {
     const targetDate = searchParams.get("date") || todayVn;
     const nextDate = getNextDayStr(targetDate);
 
-    // Danh sách 2 ngày cần cào để phục vụ ca trực 03:00 -> 03:00+
     const daysToScan = [targetDate, nextDate];
 
-    // 1. Tải trước các chuyến bay hiện có của cả 2 ngày từ Firestore
+    // 1. Tải trước các chuyến bay hiện có từ Firestore
     const existingSnap = await getDocs(
       query(collection(db, "flights_sgn"), where("date", "in", daysToScan))
     );
     const existingMap = new Map();
     existingSnap.forEach((d) => existingMap.set(d.id, d.data()));
 
-    // 2. Tải trang ban đầu từ VIAGS để lấy mã xác thực ASP.NET
+    // 2. Lấy mã xác thực ban đầu từ VIAGS
     const initialRes = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
       headers: {
         "User-Agent":
@@ -126,99 +132,109 @@ async function handleSync(request) {
       { station: "INT", trip: "A" },
     ];
 
-    let allFlights = [];
+    // 3. TỐC ĐỘ CAO: GỬI TOÀN BỘ CÁC YÊU CẦU SONG SONG (PROMISE.ALL)
+    const requestPromises = [];
 
-    // 3. Quét liên hoàn cả ngày D và ngày D+1
     for (const scanDate of daysToScan) {
       for (const task of scanTasks) {
-        const formData = new URLSearchParams();
-        formData.append(
-          "ctl00$ScriptManager1",
-          "ctl00$mainContent$ctl00$updSchedule|ctl00$mainContent$ctl00$ddlOriginal"
-        );
-        formData.append("__EVENTTARGET", "ctl00$mainContent$ctl00$ddlOriginal");
-        formData.append("__EVENTARGUMENT", "");
-        formData.append("__LASTFOCUS", "");
-        formData.append("__VIEWSTATEFIELDCOUNT", viewState1 ? "2" : "1");
-        formData.append("__VIEWSTATE", viewState);
-        if (viewState1) formData.append("__VIEWSTATE1", viewState1);
-        formData.append("__VIEWSTATEGENERATOR", viewStateGenerator);
-        formData.append("__EVENTVALIDATION", eventValidation);
-        formData.append("ctl00$mainContent$ctl00$ddlStation", task.station);
-        formData.append("ctl00$mainContent$ctl00$ddlTrip", task.trip);
-        formData.append("ctl00$mainContent$ctl00$ddlOriginal", "SGN");
-        formData.append("ctl00$mainContent$ctl00$datetimepicker1", scanDate);
-        formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
-        formData.append("__ASYNCPOST", "true");
+        requestPromises.push(
+          (async () => {
+            try {
+              const formData = new URLSearchParams();
+              formData.append(
+                "ctl00$ScriptManager1",
+                "ctl00$mainContent$ctl00$updSchedule|ctl00$mainContent$ctl00$ddlOriginal"
+              );
+              formData.append("__EVENTTARGET", "ctl00$mainContent$ctl00$ddlOriginal");
+              formData.append("__EVENTARGUMENT", "");
+              formData.append("__LASTFOCUS", "");
+              formData.append("__VIEWSTATEFIELDCOUNT", viewState1 ? "2" : "1");
+              formData.append("__VIEWSTATE", viewState);
+              if (viewState1) formData.append("__VIEWSTATE1", viewState1);
+              formData.append("__VIEWSTATEGENERATOR", viewStateGenerator);
+              formData.append("__EVENTVALIDATION", eventValidation);
+              formData.append("ctl00$mainContent$ctl00$ddlStation", task.station);
+              formData.append("ctl00$mainContent$ctl00$ddlTrip", task.trip);
+              formData.append("ctl00$mainContent$ctl00$ddlOriginal", "SGN");
+              formData.append("ctl00$mainContent$ctl00$datetimepicker1", scanDate);
+              formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
+              formData.append("__ASYNCPOST", "true");
 
-        const response = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
-          method: "POST",
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-MicrosoftAjax": "Delta=true",
-            Cookie: cookie,
-            Referer: "https://www.viags.vn/en-US/flight-schedules",
-          },
-          body: formData.toString(),
-        });
+              const response = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
+                method: "POST",
+                headers: {
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                  "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                  "X-MicrosoftAjax": "Delta=true",
+                  Cookie: cookie,
+                  Referer: "https://www.viags.vn/en-US/flight-schedules",
+                },
+                body: formData.toString(),
+              });
 
-        const text = await response.text();
+              const text = await response.text();
+              const jsonMatch = text.match(/beginLoadData\((\[[\s\S]*?\]),\s*\d+\)/);
+              if (jsonMatch && jsonMatch[1]) {
+                const parsed = JSON.parse(jsonMatch[1]);
+                const taskFlights = [];
+                for (let idx = 0; idx < parsed.length; idx++) {
+                  const item = parsed[idx];
+                  const rawFlt = (item.FltNo || "").trim();
+                  const cleanFlt = rawFlt.replace(/\s+/g, "").toUpperCase();
+                  const timeKey = (item.ST || "").replace(/[^0-9]/g, "");
 
-        const jsonMatch = text.match(/beginLoadData\((\[[\s\S]*?\]),\s*\d+\)/);
-        if (jsonMatch && jsonMatch[1]) {
-          try {
-            const parsed = JSON.parse(jsonMatch[1]);
-            for (let idx = 0; idx < parsed.length; idx++) {
-              const item = parsed[idx];
-              const rawFlt = (item.FltNo || "").trim();
-              const cleanFlt = rawFlt.replace(/\s+/g, "").toUpperCase();
-              const timeKey = (item.ST || "").replace(/[^0-9]/g, "");
+                  const docId = `${scanDate}_${task.trip}_${cleanFlt}_${timeKey}`;
+                  const existing = existingMap.get(docId);
 
-              // Khóa định danh: Ngày_Hướng_MãBay_GiờKếHoạch
-              const docId = `${scanDate}_${task.trip}_${cleanFlt}_${timeKey}`;
+                  const flightRecord = {
+                    id: docId,
+                    sortOrder: idx,
+                    date: scanDate,
+                    stationType: task.station,
+                    tripType: task.trip,
+                    st: (item.ST || "").trim(),
+                    et: (item.ET || "").trim(),
+                    airportName: normalizeAirport((item.AirportName || "").trim()),
+                    airlines: (item.Airlines || "").trim(),
+                    flightNo: cleanFlt,
+                    displayFlightNo: rawFlt,
+                    areaName: "HO CHI MINH CITY",
+                    source: existing && existing.hasTIAData ? "HYBRID (VIAGS + TIA)" : "VIAGS",
+                    updatedAt: new Date().toISOString(),
+                  };
 
-              const existing = existingMap.get(docId);
+                  if (existing && existing.hasTIAData) {
+                    flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
+                    flightRecord.remark = existing.remark || (item.Remark || "").trim();
+                    flightRecord.terminal = existing.terminal || "";
+                    flightRecord.checkinRow = existing.checkinRow || "";
+                    flightRecord.hasTIAData = true;
+                    if (existing.fr24ETA) flightRecord.fr24ETA = existing.fr24ETA;
+                  } else {
+                    flightRecord.beltGate = (item.BeltGate || "").trim();
+                    flightRecord.remark = (item.Remark || "").trim();
+                  }
 
-              const flightRecord = {
-                id: docId,
-                sortOrder: idx,
-                date: scanDate,
-                stationType: task.station,
-                tripType: task.trip,
-                st: (item.ST || "").trim(),
-                et: (item.ET || "").trim(),
-                airportName: normalizeAirport((item.AirportName || "").trim()),
-                airlines: (item.Airlines || "").trim(),
-                flightNo: cleanFlt,
-                displayFlightNo: rawFlt,
-                areaName: "HO CHI MINH CITY",
-                source: existing && existing.hasTIAData ? "HYBRID (VIAGS + TIA)" : "VIAGS",
-                updatedAt: new Date().toISOString(),
-              };
-
-              // Giữ nguyên dữ liệu TIA nếu TIA đã có thông tin Cửa, Quầy, Trạng thái
-              if (existing && existing.hasTIAData) {
-                flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
-                flightRecord.remark = existing.remark || (item.Remark || "").trim();
-                flightRecord.terminal = existing.terminal || "";
-                flightRecord.checkinRow = existing.checkinRow || "";
-                flightRecord.hasTIAData = true;
-                if (existing.fr24ETA) flightRecord.fr24ETA = existing.fr24ETA;
-              } else {
-                flightRecord.beltGate = (item.BeltGate || "").trim();
-                flightRecord.remark = (item.Remark || "").trim();
+                  taskFlights.push(flightRecord);
+                }
+                return taskFlights;
               }
-
-              allFlights.push(flightRecord);
+              return [];
+            } catch (err) {
+              console.error("Lỗi task song song:", task, scanDate, err.message);
+              return [];
             }
-          } catch (err) {
-            console.error("Lỗi parse JSON VIAGS:", err);
-          }
-        }
+          })()
+        );
       }
     }
+
+    // Chờ toàn bộ các nhóm dữ liệu cùng hoàn thành đồng thời
+    const parallelResults = await Promise.all(requestPromises);
+    const allFlights = parallelResults.flat();
+
+    console.log(`[VIAGS Fast-Sync] Đã bóc tách ${allFlights.length} chuyến bay trong ${(Date.now() - startTime) / 1000}s`);
 
     // 4. Lưu đồng bộ hàng loạt vào Firestore
     let totalUpdated = 0;
@@ -236,7 +252,7 @@ async function handleSync(request) {
       totalUpdated += chunk.length;
     }
 
-    // Cập nhật trạng thái
+    // Cập nhật trạng thái mốc thời gian mới nhất
     const metaBatch = writeBatch(db);
     const metaRef = doc(db, "meta", "sync_status");
     metaBatch.set(
@@ -246,6 +262,7 @@ async function handleSync(request) {
         totalFlightsVIAGS: totalUpdated,
         opDate: targetDate,
         status: "success",
+        durationSec: Math.round((Date.now() - startTime) / 1000),
       },
       { merge: true }
     );
@@ -253,13 +270,14 @@ async function handleSync(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đồng bộ thành công ca trực ${targetDate} (03:00 -> 03:00+)!`,
+      message: `Đồng bộ song song thành công ca trực ${targetDate}!`,
       date: targetDate,
       totalFlights: totalUpdated,
+      duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Lỗi đồng bộ ca trực VIAGS:", error);
+    console.error("Lỗi đồng bộ VIAGS:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
