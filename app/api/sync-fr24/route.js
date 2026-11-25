@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { collection, query, where, getDocs, writeBatch, doc } from "firebase/firestore";
 
 export const maxDuration = 30;
 export const dynamic = "force-dynamic";
@@ -73,7 +73,6 @@ async function handleSyncFR24(request) {
     const arrivals =
       json?.result?.response?.airport?.pluginData?.schedule?.arrivals?.data || [];
 
-    // Lưu dữ liệu FR24 theo khóa: Ngày_MãChuyếnBay (Ví dụ: "2026-11-25_VN221")
     const fr24ExactMap = new Map();
 
     arrivals.forEach((item) => {
@@ -88,14 +87,13 @@ async function handleSyncFR24(request) {
         etaSec = flt.time.real.arrival;
       }
 
-      // Xác định chính xác NGÀY đến thực tế từ radar của FR24
+      // Lấy chính xác Ngày hạ cánh từ timestamp của Flightradar24
       const scheduledSec = flt.time?.scheduled?.arrival || etaSec;
       const flightArrivalDate = getVnDateFromTimestamp(scheduledSec || etaSec);
-
       const etaFormatted = formatVnTime(etaSec);
 
       if (flightNo && flightArrivalDate && etaFormatted) {
-        // Khóa khớp chuẩn xác: Ngày_MãChuyếnBay
+        // Khóa khớp chính xác: Ngày_MãChuyếnBay
         const exactKey = `${flightArrivalDate}_${flightNo}`;
         fr24ExactMap.set(exactKey, {
           eta: etaFormatted,
@@ -125,7 +123,6 @@ async function handleSyncFR24(request) {
       const cleanFlt = (flightData.flightNo || "").replace(/\s+/g, "").toUpperCase();
       const docDate = flightData.date; // Ngày lưu của chuyến bay (25-Nov hoặc 26-Nov)
 
-      // Khóa đối soát chính xác theo cả Ngày và Mã bay
       const exactKey = `${docDate}_${cleanFlt}`;
 
       if (fr24ExactMap.has(exactKey)) {
@@ -142,7 +139,7 @@ async function handleSyncFR24(request) {
         );
         updatedCount++;
       } else if (flightData.fr24ETA) {
-        // Sai ngày (ví dụ chuyến 26-Nov bị gán nhầm giờ của 25-Nov trước đó) -> TỰ ĐỘNG XÓA BỎ DỮ LIỆU NHẦM!
+        // Sai ngày (chuyến 26-Nov bị dính giờ của 25-Nov) -> XÓA SẠCH!
         batch.set(
           docSnap.ref,
           {
