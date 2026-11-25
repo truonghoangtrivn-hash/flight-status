@@ -183,7 +183,6 @@ export default function FlightDashboard() {
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // 1. Lắng nghe trạng thái cập nhật thời gian thực
   useEffect(() => {
     const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
       if (docSnap.exists()) {
@@ -213,26 +212,17 @@ export default function FlightDashboard() {
     return () => unsubMeta();
   }, []);
 
-  // 2. CƠ CHẾ TỰ ĐỘNG CẬP NHẬT FLIGHTRADAR24 MỖI 60 GIÂY (1 PHÚT) KHI MỞ TRANG WEB
   useEffect(() => {
     const autoSyncFR24 = async () => {
       try {
         await fetch("/api/sync-fr24");
-      } catch (e) {
-        // Chạy ngầm êm đềm
-      }
+      } catch (e) {}
     };
-
-    // Kích hoạt ngay lập tức khi mở web
     autoSyncFR24();
-
-    // Lặp lại mỗi 60 giây (1 phút)
     const fr24Timer = setInterval(autoSyncFR24, 60000);
-
     return () => clearInterval(fr24Timer);
   }, []);
 
-  // 3. Lắng nghe dữ liệu ca trực từ Firestore
   useEffect(() => {
     setLoading(true);
     const q = query(
@@ -248,7 +238,6 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
-        // Áp dụng ngày khai thác 03:00 -> 03:00+
         const opDayFlights = rawList.filter((f) => {
           const st = f.st || "";
           if (f.date === filterDate) {
@@ -260,7 +249,6 @@ export default function FlightDashboard() {
           return false;
         });
 
-        // Khử trùng lặp
         const flightMap = new Map();
 
         opDayFlights.forEach((item) => {
@@ -302,7 +290,6 @@ export default function FlightDashboard() {
           }
         });
 
-        // Khử nhiễu liên danh VASCO / VNA
         const mergedList = Array.from(flightMap.values());
         const vascoDeparted = new Set();
 
@@ -323,7 +310,6 @@ export default function FlightDashboard() {
           return true;
         });
 
-        // Sắp xếp ca trực 03:00 -> 03:00+
         finalList.sort((a, b) => {
           const getWeight = (item) => {
             const [h, m] = (item.st || "00:00").split(":").map(Number);
@@ -353,7 +339,7 @@ export default function FlightDashboard() {
       setSyncMessage("Đang quét dữ liệu ca trực từ VIAGS & Flightradar24...");
       const res = await fetch(`/api/sync?date=${filterDate}`);
       const data = await res.json();
-      await fetch("/api/sync-fr24"); // Cập nhật luôn FR24
+      await fetch("/api/sync-fr24");
 
       if (data.success) {
         setSyncMessage(`Đã cập nhật ${data.totalFlights} chuyến bay ca trực!`);
@@ -562,7 +548,7 @@ export default function FlightDashboard() {
         </span>
       </div>
 
-      {/* Bảng chuyến bay */}
+      {/* Bảng chuyến bay: Hiển thị tự nhiên theo đúng dữ liệu của từng chuyến */}
       <div className="table-container">
         <table className="flight-table">
           <thead>
@@ -627,7 +613,7 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Flightradar24 */}
+                    {/* Cột 4: Flightradar24 (Hiển thị tự nhiên khi chuyến bay có giờ FR24) */}
                     <td>
                       {item.tripType === "A" && item.fr24ETA ? (
                         <span
