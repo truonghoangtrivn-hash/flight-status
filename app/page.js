@@ -133,7 +133,6 @@ function cleanAirportName(name = "") {
     .trim();
 }
 
-// Hàm tính ngày hôm sau (YYYY-MM-DD)
 function getNextDayStr(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -141,7 +140,6 @@ function getNextDayStr(dateStr) {
   return date.toISOString().split("T")[0];
 }
 
-// Hàm lấy ngày khai thác hiện tại (nếu trước 03:00 sáng thì tính là ca hôm qua)
 function getInitialOperationalDate() {
   const now = new Date();
   const vnFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -174,8 +172,8 @@ export default function FlightDashboard() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [lastFR24Time, setLastFR24Time] = useState(null);
 
-  // Mặc định ngày khai thác hiện tại
   const [filterDate, setFilterDate] = useState(() => getInitialOperationalDate());
   const nextDateStr = useMemo(() => getNextDayStr(filterDate), [filterDate]);
 
@@ -185,6 +183,7 @@ export default function FlightDashboard() {
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
+  // 1. Lắng nghe trạng thái cập nhật thời gian thực
   useEffect(() => {
     const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
       if (docSnap.exists()) {
@@ -199,12 +198,41 @@ export default function FlightDashboard() {
             })
           );
         }
+        if (data.lastFR24Sync) {
+          const fr24Date = new Date(data.lastFR24Sync);
+          setLastFR24Time(
+            fr24Date.toLocaleTimeString("vi-VN", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })
+          );
+        }
       }
     });
     return () => unsubMeta();
   }, []);
 
-  // Lắng nghe dữ liệu cả 2 ngày: Ngày D và Ngày D+1
+  // 2. CƠ CHẾ TỰ ĐỘNG CẬP NHẬT FLIGHTRADAR24 MỖI 60 GIÂY (1 PHÚT) KHI MỞ TRANG WEB
+  useEffect(() => {
+    const autoSyncFR24 = async () => {
+      try {
+        await fetch("/api/sync-fr24");
+      } catch (e) {
+        // Chạy ngầm êm đềm
+      }
+    };
+
+    // Kích hoạt ngay lập tức khi mở web
+    autoSyncFR24();
+
+    // Lặp lại mỗi 60 giây (1 phút)
+    const fr24Timer = setInterval(autoSyncFR24, 60000);
+
+    return () => clearInterval(fr24Timer);
+  }, []);
+
+  // 3. Lắng nghe dữ liệu ca trực từ Firestore
   useEffect(() => {
     setLoading(true);
     const q = query(
@@ -220,21 +248,19 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
-        // 1. ÁP DỤNG NGUYÊN TẮC NGÀY KHAI THÁC (03:00 NGÀY D -> TRƯỚC 03:00 NGÀY D+1)
+        // Áp dụng ngày khai thác 03:00 -> 03:00+
         const opDayFlights = rawList.filter((f) => {
           const st = f.st || "";
           if (f.date === filterDate) {
-            // Ngày được chọn: Lấy các chuyến từ 03:00 trở đi
             return st >= "03:00";
           }
           if (f.date === nextDateStr) {
-            // Ngày hôm sau: Chỉ lấy các chuyến trước 03:00 rạng sáng
             return st < "03:00";
           }
           return false;
         });
 
-        // 2. KHỬ TRÙNG LẶP & XỬ LÝ XUNG ĐỘT
+        // Khử trùng lặp
         const flightMap = new Map();
 
         opDayFlights.forEach((item) => {
@@ -297,11 +323,10 @@ export default function FlightDashboard() {
           return true;
         });
 
-        // 3. SẮP XẾP THEO THỨ TỰ CA TRỰC: 03:00 -> 23:59 (D) rồi nối tiếp 00:00 -> 02:59 (D+1)
+        // Sắp xếp ca trực 03:00 -> 03:00+
         finalList.sort((a, b) => {
           const getWeight = (item) => {
             const [h, m] = (item.st || "00:00").split(":").map(Number);
-            // Nếu thuộc ngày hôm sau D+1 hoặc giờ < 03:00, cộng thêm 24 tiếng để xếp ở cuối ca trực
             if (item.isNextDay || (item.st || "") < "03:00") {
               return (h + 24) * 60 + (m || 0);
             }
@@ -325,9 +350,10 @@ export default function FlightDashboard() {
   const handleTriggerSync = async () => {
     try {
       setSyncing(true);
-      setSyncMessage("Đang quét dữ liệu ca trực từ VIAGS...");
+      setSyncMessage("Đang quét dữ liệu ca trực từ VIAGS & Flightradar24...");
       const res = await fetch(`/api/sync?date=${filterDate}`);
       const data = await res.json();
+      await fetch("/api/sync-fr24"); // Cập nhật luôn FR24
 
       if (data.success) {
         setSyncMessage(`Đã cập nhật ${data.totalFlights} chuyến bay ca trực!`);
@@ -399,8 +425,9 @@ export default function FlightDashboard() {
         <div className="header-title">
           <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
           <p>
-            Ca trực khai thác (03:00 ➜ 03:00+ hôm sau) • Tích hợp VIAGS, TIA & FR24
+            Ca trực khai thác (03:00 ➜ 03:00+ hôm sau) • Tích hợp VIAGS, TIA
             {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
+            {lastFR24Time && ` • Radar FR24: ${lastFR24Time} (Tự động 60s/lần)`}
           </p>
         </div>
         <div className="header-actions">
