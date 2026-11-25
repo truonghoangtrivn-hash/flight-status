@@ -37,9 +37,9 @@ const AIRLINE_DICT = {
   FD: "THAI AIRASIA",
 };
 
-// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA 3 CHỮ CÁI
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN (NỘI ĐỊA & QUỐC TẾ)
 const IATA_MAP = {
-  // Sân bay nội địa Việt Nam
+  // --- VIỆT NAM (NỘI ĐỊA) ---
   "HA NOI": "HAN",
   HANOI: "HAN",
   "NOI BAI": "HAN",
@@ -77,51 +77,136 @@ const IATA_MAP = {
   "VAN DON": "VDO",
   "QUANG NINH": "VDO",
 
-  // Sân bay quốc tế phổ biến
+  // --- ĐÔNG NAM Á ---
+  "SIEM RIEP": "SAI",
+  "SIEM REAP": "SAI",
+  SIEMREAP: "SAI",
+  "SIEMRIEP": "SAI",
+  "PHNOM PENH": "PNH",
+  PHNOMPENH: "PNH",
+  SIHANOUKVILLE: "KOS",
   BANGKOK: "BKK",
+  SUVARNABHUMI: "BKK",
   "DON MUEANG": "DMK",
+  "DON MUANG": "DMK",
+  PHUKET: "HKT",
+  "CHIANG MAI": "CNX",
   SINGAPORE: "SIN",
+  CHANGI: "SIN",
   "KUALA LUMPUR": "KUL",
-  SEOUL: "ICN",
-  INCHEON: "ICN",
-  BUSAN: "PUS",
+  KUALALUMPUR: "KUL",
+  PENANG: "PEN",
+  JAKARTA: "CGK",
+  BALI: "DPS",
+  DENPASAR: "DPS",
+  MANILA: "MNL",
+  CEBU: "CEB",
+  VIENTIANE: "VTE",
+  "LUANG PRABANG": "LPQ",
+  YANGON: "RGN",
+  MANDALAY: "MDL",
+  BRUNEI: "BWN",
+
+  // --- ĐÔNG BẮC Á (NHẬT BẢN, HÀN QUỐC, TRUNG QUỐC, ĐÀI LOAN) ---
   TOKYO: "HND",
   HANEDA: "HND",
   "HANEDA-TOKYO, JAPAN": "HND",
+  "HANEDA-TOKYO": "HND",
   NARITA: "NRT",
   OSAKA: "KIX",
+  KANSAI: "KIX",
   NAGOYA: "NGO",
   FUKUOKA: "FUK",
+  SAPPORO: "CTS",
+  OKINAWA: "OKA",
+  HIROSHIMA: "HIJ",
+  SEOUL: "ICN",
+  INCHEON: "ICN",
+  GIMPO: "GMP",
+  BUSAN: "PUS",
+  DAEGU: "TAE",
+  JEJU: "CJU",
   TAIPEI: "TPE",
+  TAOYUAN: "TPE",
   KAOHSIUNG: "KHH",
+  TAICHUNG: "RMQ",
   "HONG KONG": "HKG",
+  HONGKONG: "HKG",
   MACAU: "MFM",
   BEIJING: "PKX",
   "BEIJING, CHINA": "PKX",
+  PEKING: "PEK",
   SHANGHAI: "PVG",
+  PUDONG: "PVG",
+  HONGQIAO: "SHA",
   GUANGZHOU: "CAN",
+  SHENZHEN: "SZX",
+  CHENGDU: "TFU",
+  KUNMING: "KMG",
+  HANGZHOU: "HGH",
+  NANJING: "NKG",
+  WUHAN: "WUH",
+  CHONGQING: "CKG",
+  XIAMEN: "XMN",
+  QINGDAO: "TAO",
+  JINAN: "TNA",
+  SANYA: "SYX",
+  HAIKOU: "HAK",
+  NANNING: "NNG",
+  ZHENGZHOU: "CGO",
+
+  // --- NAM Á (ẤN ĐỘ, SRI LANKA) ---
+  BOMBAY: "BOM",
   MUMBAI: "BOM",
   "MUMBAI, INDIA": "BOM",
   DELHI: "DEL",
-  BARNAUL: "BAX",
+  "NEW DELHI": "DEL",
+  BENGALURU: "BLR",
+  BANGALORE: "BLR",
+  CHENNAI: "MAA",
+  HYDERABAD: "HYD",
+  AHMEDABAD: "AMD",
+  KOLKATA: "CCU",
+  KOCHI: "COK",
+  COLOMBO: "CMB",
+
+  // --- CHÂU ÚC ---
   SYDNEY: "SYD",
   MELBOURNE: "MEL",
+  BRISBANE: "BNE",
   PERTH: "PER",
+  ADELAIDE: "ADL",
+  DARWIN: "DRW",
+  AUCKLAND: "AKL",
+
+  // --- HOA KỲ & CHÂU MỸ ---
+  "SAN FRANCISCO": "SFO",
+  SANFRANCISCO: "SFO",
+  "LOS ANGELES": "LAX",
+  LOSANGELES: "LAX",
+  SEATTLE: "SEA",
+  "NEW YORK": "JFK",
+  VANCOUVER: "YVR",
+
+  // --- CHÂU ÂU & TRUNG ĐÔNG ---
   PARIS: "CDG",
   FRANKFURT: "FRA",
   LONDON: "LHR",
+  HEATHROW: "LHR",
+  GATWICK: "LGW",
+  AMSTERDAM: "AMS",
   DOHA: "DOH",
   DUBAI: "DXB",
-  "PHNOM PENH": "PNH",
-  "SIEM REAP": "SAI",
-  VIENTIANE: "VTE",
-  "LUANG PRABANG": "LPQ",
-  MANILA: "MNL",
-  JAKARTA: "CGK",
-  BALI: "DPS",
+  "ABU DHABI": "AUH",
+  ISTANBUL: "IST",
+  MOSCOW: "SVO",
+  BARNAUL: "BAX",
+  NOVOSIBIRSK: "OVB",
+  ALMATY: "ALA",
+  TASHKENT: "TAS",
 };
 
-// Hàm chuyển đổi tên sân bay sang mã IATA 3 chữ cái
+// Hàm chuyển đổi sang IATA chuẩn
 function toIATA(name = "") {
   if (!name) return "";
   const clean = name
@@ -132,24 +217,24 @@ function toIATA(name = "") {
     .toUpperCase()
     .trim();
 
-  // Nếu bản thân nó đã là mã 3 chữ cái (ví dụ HAN, DAD)
+  // Nếu bản thân nó đã là mã IATA 3 chữ cái
   if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) {
     return clean;
   }
 
-  // Khớp chính xác trong từ điển
+  // 1. So khớp chính xác
   if (IATA_MAP[clean]) {
     return IATA_MAP[clean];
   }
 
-  // Khớp từ khóa chứa
+  // 2. So khớp từ khóa chứa
   for (const [key, code] of Object.entries(IATA_MAP)) {
-    if (clean.includes(key)) {
+    if (clean.includes(key) || key.includes(clean)) {
       return code;
     }
   }
 
-  return clean; // Nếu chưa có trong từ điển thì giữ nguyên
+  return clean;
 }
 
 function resolveAirlineName(flightNo = "", existingAirline = "") {
@@ -224,7 +309,7 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
-        // Khử trùng lặp thông minh
+        // Khử trùng lặp
         const flightMap = new Map();
 
         rawList.forEach((item) => {
@@ -489,7 +574,7 @@ export default function FlightDashboard() {
           <input
             type="text"
             className="form-control"
-            placeholder="Mã chuyến, HAN, DAD, VNA..."
+            placeholder="Mã chuyến, IATA (HAN, SFO, BKK)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -548,7 +633,7 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Mã sân bay IATA 3 chữ cái chuẩn (HAN, DAD, HUI, THD...) */}
+                    {/* Cột 4: Mã sân bay IATA 3 chữ cái */}
                     <td className="airport-name" style={{ fontSize: "16px", fontWeight: "800", letterSpacing: "1px" }}>
                       {iataCode}
                     </td>
