@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
-import { RefreshCw } from "lucide-react";
 
 // Bảng từ điển Hãng bay
 const AIRLINE_DICT = {
@@ -169,8 +168,6 @@ function getInitialOperationalDate() {
 export default function FlightDashboard() {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [lastFR24Time, setLastFR24Time] = useState(null);
 
@@ -183,6 +180,7 @@ export default function FlightDashboard() {
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
+  // 1. Lắng nghe trạng thái cập nhật thời gian thực từ đám mây
   useEffect(() => {
     const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
       if (docSnap.exists()) {
@@ -212,6 +210,7 @@ export default function FlightDashboard() {
     return () => unsubMeta();
   }, []);
 
+  // 2. Tự động kích hoạt làm mới ngầm Flightradar24 mỗi 60 giây khi mở trang web
   useEffect(() => {
     const autoSyncFR24 = async () => {
       try {
@@ -223,6 +222,7 @@ export default function FlightDashboard() {
     return () => clearInterval(fr24Timer);
   }, []);
 
+  // 3. Lắng nghe dữ liệu ca trực từ Firestore
   useEffect(() => {
     setLoading(true);
     const q = query(
@@ -333,27 +333,6 @@ export default function FlightDashboard() {
     return () => unsubscribe();
   }, [filterDate, nextDateStr]);
 
-  const handleTriggerSync = async () => {
-    try {
-      setSyncing(true);
-      setSyncMessage("Đang quét dữ liệu ca trực từ VIAGS & Flightradar24...");
-      const res = await fetch(`/api/sync?date=${filterDate}`);
-      const data = await res.json();
-      await fetch("/api/sync-fr24");
-
-      if (data.success) {
-        setSyncMessage(`Đã cập nhật ${data.totalFlights} chuyến bay ca trực!`);
-      } else {
-        setSyncMessage(`Lỗi: ${data.error || "Không thể đồng bộ"}`);
-      }
-    } catch (err) {
-      setSyncMessage("Lỗi kết nối máy chủ");
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncMessage(""), 4000);
-    }
-  };
-
   const filteredFlights = useMemo(() => {
     return flights.filter((f) => {
       if (f.tripType !== filterTrip) return false;
@@ -416,35 +395,38 @@ export default function FlightDashboard() {
             {lastFR24Time && ` • Radar FR24: ${lastFR24Time} (Tự động 60s/lần)`}
           </p>
         </div>
+        
+        {/* Nhãn trạng thái tự động 24/7 (Đã loại bỏ nút bấm thủ công) */}
         <div className="header-actions">
-          <button
-            className="btn-sync"
-            onClick={handleTriggerSync}
-            disabled={syncing}
-            title="Đồng bộ dữ liệu ca trực từ VIAGS"
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              backgroundColor: "rgba(255, 255, 255, 0.18)",
+              padding: "8px 16px",
+              borderRadius: "20px",
+              fontSize: "13px",
+              fontWeight: "600",
+              letterSpacing: "0.3px",
+              backdropFilter: "blur(4px)",
+              border: "1px solid rgba(255, 255, 255, 0.25)",
+            }}
           >
-            <RefreshCw size={16} className={syncing ? "spinner" : ""} />
-            {syncing ? "Đang quét..." : "Đồng bộ ngay"}
-          </button>
+            <span
+              style={{
+                width: "9px",
+                height: "9px",
+                borderRadius: "50%",
+                backgroundColor: "#4ade80",
+                boxShadow: "0 0 10px #4ade80",
+                display: "inline-block",
+              }}
+            />
+            <span>Tự động hóa 24/7 (Cloud)</span>
+          </div>
         </div>
       </div>
-
-      {syncMessage && (
-        <div
-          style={{
-            marginBottom: "16px",
-            padding: "10px 16px",
-            borderRadius: "8px",
-            backgroundColor: syncMessage.includes("Lỗi") ? "#fff1f0" : "#f6ffed",
-            color: syncMessage.includes("Lỗi") ? "#cf1322" : "#389e0d",
-            border: `1px solid ${syncMessage.includes("Lỗi") ? "#ffa39e" : "#b7eb8f"}`,
-            fontSize: "14px",
-            fontWeight: "600",
-          }}
-        >
-          {syncMessage}
-        </div>
-      )}
 
       {/* Khung Bộ Lọc */}
       <div className="filter-card">
@@ -548,7 +530,7 @@ export default function FlightDashboard() {
         </span>
       </div>
 
-      {/* Bảng chuyến bay: Hiển thị tự nhiên theo đúng dữ liệu của từng chuyến */}
+      {/* Bảng chuyến bay */}
       <div className="table-container">
         <table className="flight-table">
           <thead>
@@ -570,7 +552,7 @@ export default function FlightDashboard() {
               <tr>
                 <td colSpan="8" className="empty-state">
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}>
-                    <RefreshCw size={18} className="spinner" /> Đang tải dữ liệu ca trực...
+                    Đang tải dữ liệu ca trực...
                   </div>
                 </td>
               </tr>
@@ -613,7 +595,7 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Flightradar24 (Hiển thị tự nhiên khi chuyến bay có giờ FR24) */}
+                    {/* Cột 4: Flightradar24 */}
                     <td>
                       {item.tripType === "A" && item.fr24ETA ? (
                         <span
