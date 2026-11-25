@@ -37,9 +37,8 @@ const AIRLINE_DICT = {
   FD: "THAI AIRASIA",
 };
 
-// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA
 const IATA_MAP = {
-  // Nội địa
   "HA NOI": "HAN", HANOI: "HAN", "NOI BAI": "HAN",
   HUE: "HUI", "PHU BAI": "HUI",
   "THANH HOA": "THD", "THO XUAN": "THD",
@@ -58,8 +57,6 @@ const IATA_MAP = {
   "CA MAU": "CAH", "CAN THO": "VCA",
   "RACH GIA": "VKG", "DIEN BIEN": "DIN",
   "VAN DON": "VDO", "QUANG NINH": "VDO",
-
-  // Quốc tế
   SHENZHEN: "SZX", SHENZEN: "SZX",
   "BEIJING CHINA": "PEK", "BEIJING-CHINA": "PEK", BEIJING: "PEK", "BEIJING CAPITAL": "PEK",
   "BEIJING DAXING": "PKX", DAXING: "PKX",
@@ -136,6 +133,41 @@ function cleanAirportName(name = "") {
     .trim();
 }
 
+// Hàm tính ngày hôm sau (YYYY-MM-DD)
+function getNextDayStr(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().split("T")[0];
+}
+
+// Hàm lấy ngày khai thác hiện tại (nếu trước 03:00 sáng thì tính là ca hôm qua)
+function getInitialOperationalDate() {
+  const now = new Date();
+  const vnFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  });
+  const parts = vnFormatter.formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "12", 10);
+
+  const calDateStr = `${year}-${month}-${day}`;
+  if (hour < 3) {
+    const [y, m, d] = calDateStr.split("-").map(Number);
+    const prev = new Date(Date.UTC(y, m - 1, d));
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    return prev.toISOString().split("T")[0];
+  }
+  return calDateStr;
+}
+
 export default function FlightDashboard() {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -143,13 +175,10 @@ export default function FlightDashboard() {
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
-  const todayStr = useMemo(() => {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Ho_Chi_Minh",
-    }).format(new Date());
-  }, []);
+  // Mặc định ngày khai thác hiện tại
+  const [filterDate, setFilterDate] = useState(() => getInitialOperationalDate());
+  const nextDateStr = useMemo(() => getNextDayStr(filterDate), [filterDate]);
 
-  const [filterDate, setFilterDate] = useState(todayStr);
   const [filterTrip, setFilterTrip] = useState("D");
   const [filterStation, setFilterStation] = useState("DOM");
   const [filterAirline, setFilterAirline] = useState("ALL");
@@ -175,9 +204,13 @@ export default function FlightDashboard() {
     return () => unsubMeta();
   }, []);
 
+  // Lắng nghe dữ liệu cả 2 ngày: Ngày D và Ngày D+1
   useEffect(() => {
     setLoading(true);
-    const q = query(collection(db, "flights_sgn"), where("date", "==", filterDate));
+    const q = query(
+      collection(db, "flights_sgn"),
+      where("date", "in", [filterDate, nextDateStr])
+    );
 
     const unsubscribe = onSnapshot(
       q,
@@ -187,20 +220,36 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
+        // 1. ÁP DỤNG NGUYÊN TẮC NGÀY KHAI THÁC (03:00 NGÀY D -> TRƯỚC 03:00 NGÀY D+1)
+        const opDayFlights = rawList.filter((f) => {
+          const st = f.st || "";
+          if (f.date === filterDate) {
+            // Ngày được chọn: Lấy các chuyến từ 03:00 trở đi
+            return st >= "03:00";
+          }
+          if (f.date === nextDateStr) {
+            // Ngày hôm sau: Chỉ lấy các chuyến trước 03:00 rạng sáng
+            return st < "03:00";
+          }
+          return false;
+        });
+
+        // 2. KHỬ TRÙNG LẶP & XỬ LÝ XUNG ĐỘT
         const flightMap = new Map();
 
-        rawList.forEach((item) => {
+        opDayFlights.forEach((item) => {
           const cleanFlt = (item.flightNo || "").replace(/\s+/g, "").toUpperCase();
           const cleanSt = (item.st || "").replace(/[^0-9]/g, "");
           const cleanApt = cleanAirportName(item.airportName);
 
-          const uniqueKey = `${item.tripType || "D"}_${cleanFlt}_${cleanSt}`;
+          const uniqueKey = `${item.tripType || "D"}_${cleanFlt}_${cleanSt}_${item.date}`;
 
           if (!flightMap.has(uniqueKey)) {
             flightMap.set(uniqueKey, {
               ...item,
               flightNo: cleanFlt,
               airportName: cleanApt,
+              isNextDay: item.date === nextDateStr,
             });
           } else {
             const prev = flightMap.get(uniqueKey);
@@ -222,6 +271,7 @@ export default function FlightDashboard() {
               fr24ETA: item.fr24ETA || prev.fr24ETA,
               remark: item.hasTIAData ? item.remark : prev.remark || item.remark,
               airlines: prev.airlines || item.airlines,
+              isNextDay: item.date === nextDateStr,
             });
           }
         });
@@ -233,21 +283,32 @@ export default function FlightDashboard() {
         mergedList.forEach((f) => {
           const r = (f.remark || "").toLowerCase();
           if (f.flightNo.startsWith("0V") && (r.includes("departed") || f.beltGate)) {
-            vascoDeparted.add(`${f.st}_${f.airportName}`);
+            vascoDeparted.add(`${f.st}_${f.airportName}_${f.date}`);
           }
         });
 
         const finalList = mergedList.filter((f) => {
           const r = (f.remark || "").toLowerCase();
           if (f.flightNo.startsWith("VN") && r.includes("cancel")) {
-            if (vascoDeparted.has(`${f.st}_${f.airportName}`)) {
+            if (vascoDeparted.has(`${f.st}_${f.airportName}_${f.date}`)) {
               return false;
             }
           }
           return true;
         });
 
-        finalList.sort((a, b) => (a.st || "").localeCompare(b.st || ""));
+        // 3. SẮP XẾP THEO THỨ TỰ CA TRỰC: 03:00 -> 23:59 (D) rồi nối tiếp 00:00 -> 02:59 (D+1)
+        finalList.sort((a, b) => {
+          const getWeight = (item) => {
+            const [h, m] = (item.st || "00:00").split(":").map(Number);
+            // Nếu thuộc ngày hôm sau D+1 hoặc giờ < 03:00, cộng thêm 24 tiếng để xếp ở cuối ca trực
+            if (item.isNextDay || (item.st || "") < "03:00") {
+              return (h + 24) * 60 + (m || 0);
+            }
+            return h * 60 + (m || 0);
+          };
+          return getWeight(a) - getWeight(b);
+        });
 
         setFlights(finalList);
         setLoading(false);
@@ -259,17 +320,17 @@ export default function FlightDashboard() {
     );
 
     return () => unsubscribe();
-  }, [filterDate]);
+  }, [filterDate, nextDateStr]);
 
   const handleTriggerSync = async () => {
     try {
       setSyncing(true);
-      setSyncMessage("Đang quét dữ liệu từ VIAGS...");
+      setSyncMessage("Đang quét dữ liệu ca trực từ VIAGS...");
       const res = await fetch(`/api/sync?date=${filterDate}`);
       const data = await res.json();
 
       if (data.success) {
-        setSyncMessage(`Đã cập nhật ${data.totalFlights} chuyến bay!`);
+        setSyncMessage(`Đã cập nhật ${data.totalFlights} chuyến bay ca trực!`);
       } else {
         setSyncMessage(`Lỗi: ${data.error || "Không thể đồng bộ"}`);
       }
@@ -318,7 +379,14 @@ export default function FlightDashboard() {
   const getBadgeClass = (remark = "") => {
     const r = remark.toLowerCase();
     if (r.includes("cancel") || r.includes("hủy")) return "badge badge-cancel";
-    if (r.includes("departed") || r.includes("đã bay") || r.includes("arrived") || r.includes("landed") || r.includes("đã đến") || r.includes("hạ cánh"))
+    if (
+      r.includes("departed") ||
+      r.includes("đã bay") ||
+      r.includes("arrived") ||
+      r.includes("landed") ||
+      r.includes("đã đến") ||
+      r.includes("hạ cánh")
+    )
       return "badge badge-departed";
     if (r.includes("boarding") || r.includes("lên")) return "badge badge-boarding";
     if (r.includes("check") || r.includes("thủ tục") || r.includes("open")) return "badge badge-checkin";
@@ -331,7 +399,7 @@ export default function FlightDashboard() {
         <div className="header-title">
           <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
           <p>
-            Lịch trình bay cập nhật liên tục • Tích hợp VIAGS, TIA FIDS & Flightradar24
+            Ca trực khai thác (03:00 ➜ 03:00+ hôm sau) • Tích hợp VIAGS, TIA & FR24
             {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
           </p>
         </div>
@@ -340,7 +408,7 @@ export default function FlightDashboard() {
             className="btn-sync"
             onClick={handleTriggerSync}
             disabled={syncing}
-            title="Đồng bộ dữ liệu từ VIAGS"
+            title="Đồng bộ dữ liệu ca trực từ VIAGS"
           >
             <RefreshCw size={16} className={syncing ? "spinner" : ""} />
             {syncing ? "Đang quét..." : "Đồng bộ ngay"}
@@ -422,7 +490,7 @@ export default function FlightDashboard() {
         </div>
 
         <div className="form-group">
-          <label>Date</label>
+          <label>Ngày khai thác</label>
           <input
             type="date"
             className="form-control"
@@ -432,19 +500,19 @@ export default function FlightDashboard() {
         </div>
 
         <div className="form-group">
-          <label>Time</label>
+          <label>Khung giờ</label>
           <select
             className="form-control"
             value={filterTime}
             onChange={(e) => setFilterTime(e.target.value)}
           >
-            <option value="all">All day (Cả ngày)</option>
-            <option value="0000-0359">00:00 - 04:00</option>
-            <option value="0400-0759">04:00 - 08:00</option>
-            <option value="0800-1159">08:00 - 12:00</option>
-            <option value="1200-1559">12:00 - 16:00</option>
-            <option value="1600-1959">16:00 - 20:00</option>
-            <option value="2000-2359">20:00 - 23:59</option>
+            <option value="all">Toàn bộ ca trực (03:00 - 03:00+)</option>
+            <option value="0300-0659">03:00 - 07:00 (Sáng sớm)</option>
+            <option value="0700-1159">07:00 - 12:00 (Buổi sáng)</option>
+            <option value="1200-1659">12:00 - 17:00 (Buổi chiều)</option>
+            <option value="1700-2159">17:00 - 22:00 (Buổi tối)</option>
+            <option value="2200-2359">22:00 - 24:00 (Đêm)</option>
+            <option value="0000-0259">00:00 - 03:00 (Rạng sáng D+1)</option>
           </select>
         </div>
 
@@ -462,19 +530,19 @@ export default function FlightDashboard() {
 
       <div className="stats-bar">
         <span>
-          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
+          Ca trực ngày <strong>{filterDate}</strong> (đến trước 03:00 sáng {nextDateStr}): Đang hiển thị{" "}
+          <strong>{filteredFlights.length}</strong> chuyến bay
         </span>
       </div>
 
-      {/* Bảng chuyến bay: CỘT FLIGHTRADAR24 NẰM GIỮA ESTIMATED VÀ DESTINATION/FROM */}
+      {/* Bảng chuyến bay */}
       <div className="table-container">
         <table className="flight-table">
           <thead>
             <tr>
               <th style={{ width: "110px" }}>Flights</th>
-              <th style={{ width: "95px" }}>Scheduled</th>
+              <th style={{ width: "105px" }}>Scheduled</th>
               <th style={{ width: "95px" }}>Estimated</th>
-              {/* CỘT MỚI: FLIGHTRADAR24 */}
               <th style={{ width: "125px", color: "#f59e0b" }}>Flightradar24</th>
               <th style={{ width: "110px" }}>{filterTrip === "D" ? "Destination" : "From"}</th>
               <th style={{ width: "140px" }}>
@@ -489,7 +557,7 @@ export default function FlightDashboard() {
               <tr>
                 <td colSpan="8" className="empty-state">
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}>
-                    <RefreshCw size={18} className="spinner" /> Đang tải dữ liệu...
+                    <RefreshCw size={18} className="spinner" /> Đang tải dữ liệu ca trực...
                   </div>
                 </td>
               </tr>
@@ -499,12 +567,30 @@ export default function FlightDashboard() {
                 const iataCode = toIATA(item.airportName);
 
                 return (
-                  <tr key={`${item.flightNo}_${item.st}`}>
+                  <tr key={`${item.flightNo}_${item.st}_${item.date}`}>
                     {/* Cột 1: Flights */}
                     <td className="flight-no">{item.flightNo}</td>
 
                     {/* Cột 2: Scheduled */}
-                    <td className="time-box">{item.st}</td>
+                    <td className="time-box">
+                      {item.st}
+                      {item.isNextDay && (
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            color: "#dc2626",
+                            marginLeft: "4px",
+                            backgroundColor: "#fef2f2",
+                            padding: "1px 4px",
+                            borderRadius: "4px",
+                            border: "1px solid #fecaca",
+                          }}
+                        >
+                          +1
+                        </span>
+                      )}
+                    </td>
 
                     {/* Cột 3: Estimated */}
                     <td
@@ -514,7 +600,7 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Flightradar24 (Dành cho chuyến đến ARR) */}
+                    {/* Cột 4: Flightradar24 */}
                     <td>
                       {item.tripType === "A" && item.fr24ETA ? (
                         <span
@@ -588,7 +674,7 @@ export default function FlightDashboard() {
             ) : (
               <tr>
                 <td colSpan="8" className="empty-state">
-                  Không tìm thấy chuyến bay phù hợp với bộ lọc đã chọn.
+                  Không tìm thấy chuyến bay phù hợp với ca trực này.
                 </td>
               </tr>
             )}

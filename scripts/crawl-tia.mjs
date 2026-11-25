@@ -39,6 +39,13 @@ function formatVnTime(timestampSec) {
   });
 }
 
+function getNextDayStr(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().split("T")[0];
+}
+
 // 4 liên kết TIA
 const TIA_TARGETS = [
   { url: "https://tia.vietnamairport.vn/Depdom", tripType: "D", stationType: "DOM", name: "Đi Quốc Nội" },
@@ -131,9 +138,9 @@ async function scrapeTIA(browser, target) {
   }));
 }
 
-// Cào dữ liệu từ Flightradar24 SGN Arrivals
+// Cào Flightradar24
 async function scrapeFlightradar24(browser) {
-  console.log("=== [FLIGHTRADAR24] BẮT ĐẦU CÀO GIỜ DỰ ĐÁP (ETA) TÂN SƠN NHẤT ===");
+  console.log("=== [FLIGHTRADAR24] BẮT ĐẦU CÀO GIỜ DỰ ĐÁP (ETA) ===");
   const frPage = await browser.newPage();
   await frPage.setUserAgent(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -151,11 +158,7 @@ async function scrapeFlightradar24(browser) {
       try {
         const response = await fetch(
           "https://api.flightradar24.com/common/v1/airport.json?code=sgn&plugin[]=&plugin-setting[schedule][mode]=arrivals&page=1&limit=100",
-          {
-            headers: {
-              Accept: "application/json",
-            },
-          }
+          { headers: { Accept: "application/json" } }
         );
         return await response.json();
       } catch (e) {
@@ -173,8 +176,6 @@ async function scrapeFlightradar24(browser) {
       apiResult.result.response.airport.pluginData.schedule.arrivals
     ) {
       const arrivals = apiResult.result.response.airport.pluginData.schedule.arrivals.data || [];
-      console.log(`[FR24] Nhận được ${arrivals.length} chuyến bay đến từ API Flightradar24`);
-
       arrivals.forEach((item) => {
         const flt = item.flight;
         if (!flt || !flt.identification || !flt.identification.number) return;
@@ -193,7 +194,6 @@ async function scrapeFlightradar24(browser) {
         }
       });
     } else {
-      console.log("[FR24] Đọc trực tiếp bảng DOM Flightradar24...");
       const tableData = await frPage.evaluate(() => {
         const rows = document.querySelectorAll("table#tbl-datatable tbody tr");
         const list = [];
@@ -217,21 +217,35 @@ async function scrapeFlightradar24(browser) {
       });
     }
   } catch (err) {
-    console.error("[FR24] Lỗi khi cào Flightradar24:", err.message);
+    console.error("[FR24] Lỗi cào Flightradar24:", err.message);
   } finally {
     await frPage.close();
   }
 
-  console.log(`[FR24] Đã trích xuất thành công ETA của ${frMap.size} chuyến bay đến từ Flightradar24`);
+  console.log(`[FR24] Đã lấy thành công ETA của ${frMap.size} chuyến bay đến`);
   return frMap;
 }
 
 async function main() {
-  const todayVn = new Intl.DateTimeFormat("en-CA", {
+  const now = new Date();
+  const vnFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Ho_Chi_Minh",
-  }).format(new Date());
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  });
+  const parts = vnFormatter.formatToParts(now);
+  const curYear = parts.find((p) => p.type === "year")?.value;
+  const curMonth = parts.find((p) => p.type === "month")?.value;
+  const curDay = parts.find((p) => p.type === "day")?.value;
+  const curHour = parseInt(parts.find((p) => p.type === "hour")?.value || "12", 10);
 
-  console.log(`=== BẮT ĐẦU CÀO DỮ LIỆU TIA & FLIGHTRADAR24 (NGÀY: ${todayVn}) ===`);
+  const todayCalStr = `${curYear}-${curMonth}-${curDay}`;
+  const nextDayCalStr = getNextDayStr(todayCalStr);
+
+  console.log(`=== BẮT ĐẦU CÀO DỮ LIỆU TIA & FR24 (GIỜ HIỆN TẠI VN: ${curHour}h, NGÀY: ${todayCalStr}) ===`);
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -259,21 +273,33 @@ async function main() {
 
   await browser.close();
 
-  // 3. Tải các chuyến bay đến hiện có để gắn FR24 ETA
-  console.log("=== ĐỒNG BỘ DỮ LIỆU VÀO FIREBASE FIRESTORE ===");
+  // 3. Tải các chuyến bay đến hiện có của cả 2 ngày để gắn FR24 ETA
   const arrivalSnap = await getDocs(
-    query(collection(db, "flights_sgn"), where("date", "==", todayVn), where("tripType", "==", "A"))
+    query(
+      collection(db, "flights_sgn"),
+      where("date", "in", [todayCalStr, nextDayCalStr]),
+      where("tripType", "==", "A")
+    )
   );
 
   const batch = writeBatch(db);
 
+  // Lưu dữ liệu TIA với cơ chế phân định ngày thông minh
   for (const f of allTIA) {
     const timeKey = (f.std || "").replace(/[^0-9]/g, "");
-    const docId = `${todayVn}_${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
+
+    // XỬ LÝ CHUYẾN BAY QUA NỬA ĐÊM:
+    // Nếu quét lúc tối (curHour >= 18) mà giờ bay < 03:00 -> Gán vào ngày hôm sau (D+1)
+    let assignedDate = todayCalStr;
+    if (curHour >= 18 && (f.std || "") < "03:00") {
+      assignedDate = nextDayCalStr;
+    }
+
+    const docId = `${assignedDate}_${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
     const flightRef = doc(db, "flights_sgn", docId);
 
     const updateData = {
-      date: todayVn,
+      date: assignedDate,
       stationType: f.stationType,
       tripType: f.tripType,
       flightNo: f.cleanFlightNo,
@@ -297,6 +323,7 @@ async function main() {
     batch.set(flightRef, updateData, { merge: true });
   }
 
+  // Cập nhật FR24 ETA cho các chuyến đến đã có trong Firestore
   arrivalSnap.forEach((docSnap) => {
     const flightData = docSnap.data();
     const cleanFlt = (flightData.flightNo || "").replace(/\s+/g, "").toUpperCase();
@@ -320,7 +347,7 @@ async function main() {
   );
 
   await batch.commit();
-  console.log("=== ĐÃ CẬP NHẬT HỢP NHẤT TOÀN DIỆN VÀO FIREBASE THÀNH CÔNG! ===");
+  console.log("=== ĐÃ CẬP NHẬT CA TRỰC THÀNH CÔNG VÀO FIREBASE! ===");
   process.exit(0);
 }
 
