@@ -37,7 +37,7 @@ const AIRLINE_DICT = {
   FD: "THAI AIRASIA",
 };
 
-// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN (NỘI ĐỊA & QUỐC TẾ)
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN (CHÍNH XÁC THEO MỌI CÁCH VIẾT CỦA VIAGS & TIA)
 const IATA_MAP = {
   // --- VIỆT NAM (NỘI ĐỊA) ---
   "HA NOI": "HAN",
@@ -77,11 +77,48 @@ const IATA_MAP = {
   "VAN DON": "VDO",
   "QUANG NINH": "VDO",
 
+  // --- TRUNG QUỐC & HỒNG KÔNG, ĐÀI LOAN ---
+  SHENZHEN: "SZX",
+  SHENZEN: "SZX",
+  "BEIJING CHINA": "PEK",
+  "BEIJING-CHINA": "PEK",
+  BEIJING: "PEK",
+  "BEIJING CAPITAL": "PEK",
+  "BEIJING DAXING": "PKX",
+  DAXING: "PKX",
+  SHANGHAI: "PVG",
+  PUDONG: "PVG",
+  HONGQIAO: "SHA",
+  GUANGZHOU: "CAN",
+  KUNMING: "KMG",
+  NANJING: "NKG",
+  CHENGDU: "TFU",
+  CHONGQING: "CKG",
+  HANGZHOU: "HGH",
+  WUHAN: "WUH",
+  XIAMEN: "XMN",
+  QINGDAO: "TAO",
+  JINAN: "TNA",
+  SANYA: "SYX",
+  HAIKOU: "HAK",
+  NANNING: "NNG",
+  ZHENGZHOU: "CGO",
+  CHANGSHA: "CSX",
+  TIANJIN: "TSN",
+  HONGKONG: "HKG",
+  "HONG KONG": "HKG",
+  MACAU: "MFM",
+  MACAO: "MFM",
+  TAIPEI: "TPE",
+  TAOYUAN: "TPE",
+  KAOHSIUNG: "KHH",
+  TAICHUNG: "RMQ",
+
   // --- ĐÔNG NAM Á ---
   "SIEM RIEP": "SAI",
   "SIEM REAP": "SAI",
   SIEMREAP: "SAI",
-  "SIEMRIEP": "SAI",
+  SIEMRIEP: "SAI",
   "PHNOM PENH": "PNH",
   PHNOMPENH: "PNH",
   SIHANOUKVILLE: "KOS",
@@ -96,18 +133,21 @@ const IATA_MAP = {
   "KUALA LUMPUR": "KUL",
   KUALALUMPUR: "KUL",
   PENANG: "PEN",
+  KUCHING: "KCH",
   JAKARTA: "CGK",
+  SEMARANG: "SRG",
   BALI: "DPS",
   DENPASAR: "DPS",
+  SURABAYA: "SUB",
   MANILA: "MNL",
   CEBU: "CEB",
+  CLARK: "CRK",
   VIENTIANE: "VTE",
   "LUANG PRABANG": "LPQ",
   YANGON: "RGN",
-  MANDALAY: "MDL",
   BRUNEI: "BWN",
 
-  // --- ĐÔNG BẮC Á (NHẬT BẢN, HÀN QUỐC, TRUNG QUỐC, ĐÀI LOAN) ---
+  // --- NHẬT BẢN & HÀN QUỐC ---
   TOKYO: "HND",
   HANEDA: "HND",
   "HANEDA-TOKYO, JAPAN": "HND",
@@ -119,43 +159,38 @@ const IATA_MAP = {
   FUKUOKA: "FUK",
   SAPPORO: "CTS",
   OKINAWA: "OKA",
-  HIROSHIMA: "HIJ",
   SEOUL: "ICN",
   INCHEON: "ICN",
+  ANAA: "ICN", // Chuyến DL7926 (liên danh KE476) đi Incheon
   GIMPO: "GMP",
   BUSAN: "PUS",
   DAEGU: "TAE",
   JEJU: "CJU",
-  TAIPEI: "TPE",
-  TAOYUAN: "TPE",
-  KAOHSIUNG: "KHH",
-  TAICHUNG: "RMQ",
-  "HONG KONG": "HKG",
-  HONGKONG: "HKG",
-  MACAU: "MFM",
-  BEIJING: "PKX",
-  "BEIJING, CHINA": "PKX",
-  PEKING: "PEK",
-  SHANGHAI: "PVG",
-  PUDONG: "PVG",
-  HONGQIAO: "SHA",
-  GUANGZHOU: "CAN",
-  SHENZHEN: "SZX",
-  CHENGDU: "TFU",
-  KUNMING: "KMG",
-  HANGZHOU: "HGH",
-  NANJING: "NKG",
-  WUHAN: "WUH",
-  CHONGQING: "CKG",
-  XIAMEN: "XMN",
-  QINGDAO: "TAO",
-  JINAN: "TNA",
-  SANYA: "SYX",
-  HAIKOU: "HAK",
-  NANNING: "NNG",
-  ZHENGZHOU: "CGO",
 
-  // --- NAM Á (ẤN ĐỘ, SRI LANKA) ---
+  // --- CHÂU ÂU, NGA, TRUNG ĐÔNG, TRUNG Á ---
+  COPENHAGEN: "CPH",
+  KOBENHAVN: "CPH",
+  MUENCHEN: "MUC",
+  MUNICH: "MUC",
+  PARIS: "CDG",
+  FRANKFURT: "FRA",
+  LONDON: "LHR",
+  HEATHROW: "LHR",
+  GATWICK: "LGW",
+  AMSTERDAM: "AMS",
+  ASHKHABAD: "ASB",
+  ASHGABAT: "ASB",
+  MOSCOW: "SVO",
+  BARNAUL: "BAX",
+  NOVOSIBIRSK: "OVB",
+  ALMATY: "ALA",
+  TASHKENT: "TAS",
+  ISTANBUL: "IST",
+  DOHA: "DOH",
+  DUBAI: "DXB",
+  "ABU DHABI": "AUH",
+
+  // --- NAM Á ---
   BOMBAY: "BOM",
   MUMBAI: "BOM",
   "MUMBAI, INDIA": "BOM",
@@ -164,56 +199,39 @@ const IATA_MAP = {
   BENGALURU: "BLR",
   BANGALORE: "BLR",
   CHENNAI: "MAA",
-  HYDERABAD: "HYD",
-  AHMEDABAD: "AMD",
   KOLKATA: "CCU",
-  KOCHI: "COK",
   COLOMBO: "CMB",
 
-  // --- CHÂU ÚC ---
+  // --- CHÂU ÚC & HOA KỲ ---
   SYDNEY: "SYD",
   MELBOURNE: "MEL",
   BRISBANE: "BNE",
   PERTH: "PER",
   ADELAIDE: "ADL",
-  DARWIN: "DRW",
   AUCKLAND: "AKL",
-
-  // --- HOA KỲ & CHÂU MỸ ---
+  HONOLULU: "HNL",
   "SAN FRANCISCO": "SFO",
   SANFRANCISCO: "SFO",
   "LOS ANGELES": "LAX",
   LOSANGELES: "LAX",
   SEATTLE: "SEA",
   "NEW YORK": "JFK",
-  VANCOUVER: "YVR",
-
-  // --- CHÂU ÂU & TRUNG ĐÔNG ---
-  PARIS: "CDG",
-  FRANKFURT: "FRA",
-  LONDON: "LHR",
-  HEATHROW: "LHR",
-  GATWICK: "LGW",
-  AMSTERDAM: "AMS",
-  DOHA: "DOH",
-  DUBAI: "DXB",
-  "ABU DHABI": "AUH",
-  ISTANBUL: "IST",
-  MOSCOW: "SVO",
-  BARNAUL: "BAX",
-  NOVOSIBIRSK: "OVB",
-  ALMATY: "ALA",
-  TASHKENT: "TAS",
 };
+
+// Sắp xếp các từ khóa theo độ dài từ dài đến ngắn để so khớp chính xác nhất
+const SORTED_IATA_KEYS = Object.keys(IATA_MAP).sort((a, b) => b.length - a.length);
 
 // Hàm chuyển đổi sang IATA chuẩn
 function toIATA(name = "") {
   if (!name) return "";
-  const clean = name
+  // Xóa bỏ dấu gạch ngang, dấu phẩy, khoảng trắng dư thừa
+  let clean = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
+    .replace(/[-_.,]/g, " ")
+    .replace(/\s+/g, " ")
     .toUpperCase()
     .trim();
 
@@ -227,10 +245,11 @@ function toIATA(name = "") {
     return IATA_MAP[clean];
   }
 
-  // 2. So khớp từ khóa chứa
-  for (const [key, code] of Object.entries(IATA_MAP)) {
-    if (clean.includes(key) || key.includes(clean)) {
-      return code;
+  // 2. So khớp từ khóa ưu tiên chuỗi dài trước
+  for (const key of SORTED_IATA_KEYS) {
+    const cleanKey = key.replace(/[-_.,]/g, " ");
+    if (clean === cleanKey || clean.includes(cleanKey) || cleanKey.includes(clean)) {
+      return IATA_MAP[key];
     }
   }
 
@@ -309,7 +328,6 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
-        // Khử trùng lặp
         const flightMap = new Map();
 
         rawList.forEach((item) => {
@@ -347,7 +365,7 @@ export default function FlightDashboard() {
           }
         });
 
-        // Khử nhiễu liên danh VASCO (0V) / VNA (VN)
+        // Khử nhiễu liên danh VASCO / VNA
         const mergedList = Array.from(flightMap.values());
         const vascoDeparted = new Set();
 
@@ -439,7 +457,7 @@ export default function FlightDashboard() {
   const getBadgeClass = (remark = "") => {
     const r = remark.toLowerCase();
     if (r.includes("cancel") || r.includes("hủy")) return "badge badge-cancel";
-    if (r.includes("departed") || r.includes("đã bay") || r.includes("arrived") || r.includes("đã đến"))
+    if (r.includes("departed") || r.includes("đã bay") || r.includes("arrived") || r.includes("landed") || r.includes("đã đến") || r.includes("hạ cánh"))
       return "badge badge-departed";
     if (r.includes("boarding") || r.includes("lên")) return "badge badge-boarding";
     if (r.includes("check") || r.includes("thủ tục") || r.includes("open")) return "badge badge-checkin";
@@ -574,7 +592,7 @@ export default function FlightDashboard() {
           <input
             type="text"
             className="form-control"
-            placeholder="Mã chuyến, IATA (HAN, SFO, BKK)..."
+            placeholder="Mã chuyến, IATA (SZX, CPH, HKT, PEK)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
