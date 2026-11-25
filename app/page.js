@@ -5,6 +5,51 @@ import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { RefreshCw, Search } from "lucide-react";
 
+// Bảng từ điển mã hãng bay phổ biến tại Tân Sơn Nhất (SGN)
+const AIRLINE_DICT = {
+  VN: "VIETNAM AIRLINES",
+  "0V": "VASCO",
+  OV: "VASCO",
+  BL: "PACIFIC AIRLINES",
+  VJ: "VIETJET AIR",
+  QH: "BAMBOO AIRWAYS",
+  VU: "VIETRAVEL AIRLINES",
+  "9G": "9 AIR",
+  K6: "CAMBODIA ANGKOR AIR",
+  GA: "GARUDA INDONESIA",
+  TK: "TURKISH AIRLINES",
+  CI: "CHINA AIRLINES",
+  BR: "EVA AIR",
+  SQ: "SINGAPORE AIRLINES",
+  TG: "THAI AIRWAYS",
+  CX: "CATHAY PACIFIC",
+  EK: "EMIRATES",
+  QR: "QATAR AIRWAYS",
+  KE: "KOREAN AIR",
+  OZ: "ASIANA AIRLINES",
+  JL: "JAPAN AIRLINES",
+  NH: "ALL NIPPON AIRWAYS",
+  CZ: "CHINA SOUTHERN AIRLINES",
+  MU: "CHINA EASTERN AIRLINES",
+  CA: "AIR CHINA",
+  TR: "SCOOT",
+  AK: "AIRASIA",
+  FD: "THAI AIRASIA",
+  MH: "MALAYSIA AIRLINES",
+  PG: "BANGKOK AIRWAYS",
+  MF: "XIAMEN AIR",
+};
+
+function resolveAirlineName(flightNo = "", existingAirline = "") {
+  if (existingAirline && existingAirline.trim() !== "") {
+    return existingAirline.trim();
+  }
+  const clean = flightNo.replace(/\s+/g, "").toUpperCase();
+  const prefix2 = clean.slice(0, 2);
+  if (AIRLINE_DICT[prefix2]) return AIRLINE_DICT[prefix2];
+  return "-";
+}
+
 export default function FlightDashboard() {
   const [flights, setFlights] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +74,7 @@ export default function FlightDashboard() {
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // 1. Lắng nghe trạng thái cập nhật (Sync Status) thời gian thực
+  // 1. Lắng nghe trạng thái cập nhật thời gian thực
   useEffect(() => {
     const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
       if (docSnap.exists()) {
@@ -62,7 +107,7 @@ export default function FlightDashboard() {
           list.push(doc.data());
         });
 
-        // Sắp xếp thứ tự: Ưu tiên giờ Scheduled (ST), rồi tới số thứ tự quét
+        // Sắp xếp thứ tự: Ưu tiên giờ Scheduled (ST)
         list.sort((a, b) => {
           if (a.st === b.st) {
             return (a.sortOrder || 0) - (b.sortOrder || 0);
@@ -112,11 +157,14 @@ export default function FlightDashboard() {
       // 2. Lọc DOM hoặc INTL
       if (f.stationType !== filterStation) return false;
 
+      // Tính toán tên hãng
+      const airlineName = resolveAirlineName(f.flightNo, f.airlines);
+
       // 3. Lọc VNA hoặc ALL
       if (filterAirline === "VNA") {
         const isVna =
-          (f.airlines || "").toUpperCase().includes("VIETNAM AIRLINES") ||
-          (f.flightNo || "").toUpperCase().startsWith("VN");
+          airlineName.includes("VIETNAM AIRLINES") ||
+          (f.flightNo || "").replace(/\s+/g, "").toUpperCase().startsWith("VN");
         if (!isVna) return false;
       }
 
@@ -127,12 +175,12 @@ export default function FlightDashboard() {
         if (flightTime < start || flightTime > end) return false;
       }
 
-      // 5. Tìm kiếm nhanh (Mã chuyến bay, Điểm đến/đi, Hãng bay)
+      // 5. Tìm kiếm nhanh
       if (searchTerm.trim() !== "") {
         const term = searchTerm.toLowerCase();
         const matchFlt = (f.flightNo || "").toLowerCase().includes(term);
         const matchAirport = (f.airportName || "").toLowerCase().includes(term);
-        const matchAirline = (f.airlines || "").toLowerCase().includes(term);
+        const matchAirline = airlineName.toLowerCase().includes(term);
         if (!matchFlt && !matchAirport && !matchAirline) return false;
       }
 
@@ -146,8 +194,8 @@ export default function FlightDashboard() {
     if (r.includes("cancel") || r.includes("hủy")) return "badge badge-cancel";
     if (r.includes("departed") || r.includes("đã bay") || r.includes("arrived") || r.includes("đã đến"))
       return "badge badge-departed";
-    if (r.includes("boarding") || r.includes("lên máy bay")) return "badge badge-boarding";
-    if (r.includes("check-in") || r.includes("open")) return "badge badge-checkin";
+    if (r.includes("boarding") || r.includes("lên")) return "badge badge-boarding";
+    if (r.includes("check") || r.includes("thủ tục") || r.includes("open")) return "badge badge-checkin";
     return "badge badge-default";
   };
 
@@ -158,7 +206,7 @@ export default function FlightDashboard() {
         <div className="header-title">
           <h1>Flight Information - Tân Sơn Nhất (SGN)</h1>
           <p>
-            Lịch trình bay cập nhật liên tục
+            Lịch trình bay cập nhật liên tục • Tích hợp VIAGS & TIA FIDS
             {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
           </p>
         </div>
@@ -167,7 +215,7 @@ export default function FlightDashboard() {
             className="btn-sync"
             onClick={handleTriggerSync}
             disabled={syncing}
-            title="Đồng bộ dữ liệu mới nhất từ VIAGS"
+            title="Đồng bộ dữ liệu từ VIAGS"
           >
             <RefreshCw size={16} className={syncing ? "spinner" : ""} />
             {syncing ? "Đang quét..." : "Đồng bộ ngay"}
@@ -300,16 +348,16 @@ export default function FlightDashboard() {
         </span>
       </div>
 
-      {/* Bảng chuyến bay: Thứ tự cột mới theo yêu cầu */}
+      {/* Bảng chuyến bay */}
       <div className="table-container">
         <table className="flight-table">
           <thead>
             <tr>
               <th style={{ width: "120px" }}>Flights</th>
-              <th style={{ width: "110px" }}>Scheduled</th>
-              <th style={{ width: "110px" }}>Estimated</th>
+              <th style={{ width: "100px" }}>Scheduled</th>
+              <th style={{ width: "100px" }}>Estimated</th>
               <th>{filterTrip === "D" ? "Destination" : "From"}</th>
-              <th style={{ width: "110px" }}>
+              <th style={{ width: "150px" }}>
                 {filterTrip === "D" ? "Gate" : "Baggage"}
               </th>
               <th style={{ width: "150px" }}>Remarks</th>
@@ -326,64 +374,75 @@ export default function FlightDashboard() {
                 </td>
               </tr>
             ) : filteredFlights.length > 0 ? (
-              filteredFlights.map((item) => (
-                <tr key={item.id}>
-                  {/* Cột 1: Flights */}
-                  <td className="flight-no">{item.flightNo}</td>
+              filteredFlights.map((item) => {
+                const airlineName = resolveAirlineName(item.flightNo, item.airlines);
+                return (
+                  <tr key={item.id}>
+                    {/* Cột 1: Flights */}
+                    <td className="flight-no">{item.flightNo}</td>
 
-                  {/* Cột 2: Scheduled */}
-                  <td className="time-box">{item.st}</td>
+                    {/* Cột 2: Scheduled */}
+                    <td className="time-box">{item.st}</td>
 
-                  {/* Cột 3: Estimated */}
-                  <td
-                    className="time-box"
-                    style={{ color: item.et !== item.st ? "#e53e3e" : "#334155" }}
-                  >
-                    {item.et}
-                  </td>
+                    {/* Cột 3: Estimated */}
+                    <td
+                      className="time-box"
+                      style={{ color: item.et !== item.st ? "#e53e3e" : "#334155" }}
+                    >
+                      {item.et}
+                    </td>
 
-                  {/* Cột 4: Destination hoặc From (đã bỏ chữ Đến nơi / Khởi hành) */}
-                  <td className="airport-name">{item.airportName}</td>
+                    {/* Cột 4: Destination hoặc From */}
+                    <td className="airport-name">{item.airportName}</td>
 
-                  {/* Cột 5: Gate hoặc Baggage */}
-                  <td>
-                    {item.beltGate ? (
-                      <span className="gate-badge">{item.beltGate}</span>
-                    ) : (
-                      <span style={{ color: "#94a3b8" }}>-</span>
-                    )}
-                  </td>
+                    {/* Cột 5: Gate hoặc Baggage kèm Nhà ga & Quầy (từ TIA) */}
+                    <td>
+                      <div>
+                        {item.beltGate ? (
+                          <span className="gate-badge">{item.beltGate}</span>
+                        ) : (
+                          <span style={{ color: "#94a3b8" }}>-</span>
+                        )}
+                      </div>
+                      {(item.terminal || item.checkinRow) && (
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            color: "#0369a1",
+                            backgroundColor: "#f0f9ff",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            display: "inline-block",
+                            marginTop: "4px",
+                            border: "1px solid #bae6fd",
+                          }}
+                        >
+                          {item.terminal && <span>T{item.terminal}</span>}
+                          {item.terminal && item.checkinRow && <span> • </span>}
+                          {item.checkinRow && <span>Quầy {item.checkinRow}</span>}
+                        </div>
+                      )}
+                    </td>
 
-                  {/* Cột 6: Remarks */}
-                  <td>
-                    <span className={getBadgeClass(item.remark)}>
-                      {item.remark || "On schedule"}
-                    </span>
-                  </td>
+                    {/* Cột 6: Remarks */}
+                    <td>
+                      <span className={getBadgeClass(item.remark)}>
+                        {item.remark || "On schedule"}
+                      </span>
+                    </td>
 
-                  {/* Cột 7: Airlines */}
-                  <td>{item.airlines}</td>
-                </tr>
-              ))
+                    {/* Cột 7: Airlines */}
+                    <td style={{ fontWeight: "500", color: "#334155" }}>
+                      {airlineName}
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan="7" className="empty-state">
-                  {flights.length === 0 ? (
-                    <div>
-                      <p style={{ marginBottom: "12px", fontSize: "15px" }}>
-                        Chưa có dữ liệu chuyến bay trong Firebase!
-                      </p>
-                      <button
-                        className="btn-sync"
-                        style={{ margin: "0 auto", color: "#00779e", border: "1px solid #00779e" }}
-                        onClick={handleTriggerSync}
-                      >
-                        <RefreshCw size={14} /> Bấm vào đây để tải dữ liệu từ VIAGS
-                      </button>
-                    </div>
-                  ) : (
-                    "Không tìm thấy chuyến bay phù hợp với bộ lọc đã chọn."
-                  )}
+                  Không tìm thấy chuyến bay phù hợp với bộ lọc đã chọn.
                 </td>
               </tr>
             )}
