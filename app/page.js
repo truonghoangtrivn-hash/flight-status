@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
-import { RefreshCw, Search, Plane, Clock, Filter, AlertCircle, CheckCircle } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 
 export default function FlightDashboard() {
   const [flights, setFlights] = useState([]);
@@ -12,7 +12,7 @@ export default function FlightDashboard() {
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
-  // Bộ lọc
+  // Mặc định ngày hôm nay
   const todayStr = useMemo(() => {
     return new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Ho_Chi_Minh",
@@ -20,8 +20,12 @@ export default function FlightDashboard() {
   }, []);
 
   const [filterDate, setFilterDate] = useState(todayStr);
-  const [filterStation, setFilterStation] = useState("ALL"); // ALL, DOM, INT
-  const [filterTrip, setFilterTrip] = useState("ALL");       // ALL, D, A
+
+  // Bộ lọc theo nút bấm: Mặc định là DEP và DOM
+  const [filterTrip, setFilterTrip] = useState("D");       // "D" (DEP) hoặc "A" (ARR)
+  const [filterStation, setFilterStation] = useState("DOM"); // "DOM" hoặc "INT" (INTL)
+  const [filterAirline, setFilterAirline] = useState("ALL"); // "ALL" hoặc "VNA"
+
   const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -32,7 +36,13 @@ export default function FlightDashboard() {
         const data = docSnap.data();
         if (data.lastUpdated) {
           const dateObj = new Date(data.lastUpdated);
-          setLastSyncTime(dateObj.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+          setLastSyncTime(
+            dateObj.toLocaleTimeString("vi-VN", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })
+          );
         }
       }
     });
@@ -52,7 +62,7 @@ export default function FlightDashboard() {
           list.push(doc.data());
         });
 
-        // Sắp xếp theo thứ tự hiển thị: Ưu tiên giờ dự kiến (ST), sau đó đến thứ tự quét
+        // Sắp xếp thứ tự: Ưu tiên giờ Scheduled (ST), rồi tới số thứ tự quét
         list.sort((a, b) => {
           if (a.st === b.st) {
             return (a.sortOrder || 0) - (b.sortOrder || 0);
@@ -96,19 +106,28 @@ export default function FlightDashboard() {
   // 4. Lọc dữ liệu hiển thị trên bảng
   const filteredFlights = useMemo(() => {
     return flights.filter((f) => {
-      // Lọc Quốc nội / Quốc tế
-      if (filterStation !== "ALL" && f.stationType !== filterStation) return false;
-      // Lọc Đi / Đến
-      if (filterTrip !== "ALL" && f.tripType !== filterTrip) return false;
+      // 1. Lọc DEP hoặc ARR
+      if (f.tripType !== filterTrip) return false;
 
-      // Lọc khung giờ
+      // 2. Lọc DOM hoặc INTL
+      if (f.stationType !== filterStation) return false;
+
+      // 3. Lọc VNA hoặc ALL
+      if (filterAirline === "VNA") {
+        const isVna =
+          (f.airlines || "").toUpperCase().includes("VIETNAM AIRLINES") ||
+          (f.flightNo || "").toUpperCase().startsWith("VN");
+        if (!isVna) return false;
+      }
+
+      // 4. Lọc khung giờ
       if (filterTime !== "all") {
         const [start, end] = filterTime.split("-");
         const flightTime = (f.st || "").replace(":", "");
         if (flightTime < start || flightTime > end) return false;
       }
 
-      // Tìm kiếm từ khóa (Mã chuyến bay, Điểm đến/đi, Hãng bay)
+      // 5. Tìm kiếm nhanh (Mã chuyến bay, Điểm đến/đi, Hãng bay)
       if (searchTerm.trim() !== "") {
         const term = searchTerm.toLowerCase();
         const matchFlt = (f.flightNo || "").toLowerCase().includes(term);
@@ -119,13 +138,14 @@ export default function FlightDashboard() {
 
       return true;
     });
-  }, [flights, filterStation, filterTrip, filterTime, searchTerm]);
+  }, [flights, filterTrip, filterStation, filterAirline, filterTime, searchTerm]);
 
-  // Hàm chọn màu cho Trạng thái (Remarks)
+  // Màu sắc cho trạng thái (Remarks)
   const getBadgeClass = (remark = "") => {
     const r = remark.toLowerCase();
     if (r.includes("cancel") || r.includes("hủy")) return "badge badge-cancel";
-    if (r.includes("departed") || r.includes("đã bay") || r.includes("arrived") || r.includes("đã đến")) return "badge badge-departed";
+    if (r.includes("departed") || r.includes("đã bay") || r.includes("arrived") || r.includes("đã đến"))
+      return "badge badge-departed";
     if (r.includes("boarding") || r.includes("lên máy bay")) return "badge badge-boarding";
     if (r.includes("check-in") || r.includes("open")) return "badge badge-checkin";
     return "badge badge-default";
@@ -133,12 +153,12 @@ export default function FlightDashboard() {
 
   return (
     <div className="container">
-      {/* Tiêu đề & Nút đồng bộ */}
+      {/* Header */}
       <div className="header-box">
         <div className="header-title">
           <h1>Flight Information - Tân Sơn Nhất (SGN)</h1>
           <p>
-            Hệ thống theo dõi và cập nhật lịch trình bay theo thời gian thực
+            Lịch trình bay cập nhật liên tục
             {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
           </p>
         </div>
@@ -150,7 +170,7 @@ export default function FlightDashboard() {
             title="Đồng bộ dữ liệu mới nhất từ VIAGS"
           >
             <RefreshCw size={16} className={syncing ? "spinner" : ""} />
-            {syncing ? "Đang đồng bộ..." : "Đồng bộ ngay"}
+            {syncing ? "Đang quét..." : "Đồng bộ ngay"}
           </button>
         </div>
       </div>
@@ -165,48 +185,73 @@ export default function FlightDashboard() {
             color: syncMessage.includes("Lỗi") ? "#cf1322" : "#389e0d",
             border: `1px solid ${syncMessage.includes("Lỗi") ? "#ffa39e" : "#b7eb8f"}`,
             fontSize: "14px",
-            fontWeight: "500",
+            fontWeight: "600",
           }}
         >
           {syncMessage}
         </div>
       )}
 
-      {/* Khung Bộ Lọc (Filters) */}
+      {/* Khung Bộ Lọc & Các Nút Chuyển Đổi */}
       <div className="filter-card">
+        {/* Nhóm 1: DEP / ARR */}
         <div className="form-group">
-          <label>Flights</label>
-          <select
-            className="form-control"
-            value={filterStation}
-            onChange={(e) => setFilterStation(e.target.value)}
-          >
-            <option value="ALL">Tất cả chuyến bay</option>
-            <option value="DOM">Domestic Flights (Quốc nội)</option>
-            <option value="INT">International Flights (Quốc tế)</option>
-          </select>
+          <label>Chuyến bay</label>
+          <div className="filter-btn-group">
+            <button
+              className={`filter-btn ${filterTrip === "D" ? "active" : ""}`}
+              onClick={() => setFilterTrip("D")}
+            >
+              DEP
+            </button>
+            <button
+              className={`filter-btn ${filterTrip === "A" ? "active" : ""}`}
+              onClick={() => setFilterTrip("A")}
+            >
+              ARR
+            </button>
+          </div>
         </div>
 
+        {/* Nhóm 2: DOM / INTL */}
         <div className="form-group">
-          <label>Departures / Arrivals</label>
-          <select
-            className="form-control"
-            value={filterTrip}
-            onChange={(e) => setFilterTrip(e.target.value)}
-          >
-            <option value="ALL">Tất cả (Đi & Đến)</option>
-            <option value="D">Departures (Khởi hành)</option>
-            <option value="A">Arrivals (Đến nơi)</option>
-          </select>
+          <label>Tuyến bay</label>
+          <div className="filter-btn-group">
+            <button
+              className={`filter-btn ${filterStation === "DOM" ? "active" : ""}`}
+              onClick={() => setFilterStation("DOM")}
+            >
+              DOM
+            </button>
+            <button
+              className={`filter-btn ${filterStation === "INT" ? "active" : ""}`}
+              onClick={() => setFilterStation("INT")}
+            >
+              INTL
+            </button>
+          </div>
         </div>
 
+        {/* Nhóm 3: ALL / VNA */}
         <div className="form-group">
-          <label>Location</label>
-          <select className="form-control" disabled value="SGN">
-            <option value="SGN">Ho Chi Minh (SGN)</option>
-          </select>
+          <label>Hãng bay</label>
+          <div className="filter-btn-group">
+            <button
+              className={`filter-btn ${filterAirline === "ALL" ? "active" : ""}`}
+              onClick={() => setFilterAirline("ALL")}
+            >
+              ALL
+            </button>
+            <button
+              className={`filter-btn ${filterAirline === "VNA" ? "active" : ""}`}
+              onClick={() => setFilterAirline("VNA")}
+            >
+              VNA
+            </button>
+          </div>
         </div>
 
+        {/* Ngày */}
         <div className="form-group">
           <label>Date</label>
           <input
@@ -217,6 +262,7 @@ export default function FlightDashboard() {
           />
         </div>
 
+        {/* Khung giờ */}
         <div className="form-group">
           <label>Time</label>
           <select
@@ -234,48 +280,40 @@ export default function FlightDashboard() {
           </select>
         </div>
 
-        <div className="form-group">
-          <label>Tìm kiếm nhanh</label>
-          <div style={{ position: "relative" }}>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Mã chuyến, điểm đến..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+        {/* Tìm kiếm */}
+        <div className="form-group" style={{ flex: 1, minWidth: "180px" }}>
+          <label>Tìm kiếm</label>
+          <input
+            type="text"
+            className="form-control"
+            placeholder="Mã chuyến, điểm đến, hãng..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
       </div>
 
-      {/* Thanh thống kê kết quả */}
+      {/* Thống kê */}
       <div className="stats-bar">
         <span>
-          Hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
-          {flights.length === 0 && !loading && " (Chưa có dữ liệu, hãy bấm 'Đồng bộ ngay')"}
+          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
         </span>
       </div>
 
-      {/* Bảng danh sách chuyến bay */}
+      {/* Bảng chuyến bay: Thứ tự cột mới theo yêu cầu */}
       <div className="table-container">
         <table className="flight-table">
           <thead>
             <tr>
-              <th style={{ width: "100px" }}>Scheduled</th>
-              <th style={{ width: "100px" }}>Estimated</th>
-              <th>
-                {filterTrip === "D"
-                  ? "Destination"
-                  : filterTrip === "A"
-                  ? "From"
-                  : "Destination / From"}
-              </th>
-              <th>Airlines</th>
               <th style={{ width: "120px" }}>Flights</th>
-              <th style={{ width: "100px" }}>
-                {filterTrip === "A" ? "Baggage" : "Gate"}
+              <th style={{ width: "110px" }}>Scheduled</th>
+              <th style={{ width: "110px" }}>Estimated</th>
+              <th>{filterTrip === "D" ? "Destination" : "From"}</th>
+              <th style={{ width: "110px" }}>
+                {filterTrip === "D" ? "Gate" : "Baggage"}
               </th>
-              <th style={{ width: "140px" }}>Remarks</th>
+              <th style={{ width: "150px" }}>Remarks</th>
+              <th>Airlines</th>
             </tr>
           </thead>
           <tbody>
@@ -283,37 +321,48 @@ export default function FlightDashboard() {
               <tr>
                 <td colSpan="7" className="empty-state">
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}>
-                    <RefreshCw size={18} className="spinner" /> Đang tải dữ liệu từ Firestore...
+                    <RefreshCw size={18} className="spinner" /> Đang tải dữ liệu...
                   </div>
                 </td>
               </tr>
             ) : filteredFlights.length > 0 ? (
               filteredFlights.map((item) => (
                 <tr key={item.id}>
+                  {/* Cột 1: Flights */}
+                  <td className="flight-no">{item.flightNo}</td>
+
+                  {/* Cột 2: Scheduled */}
                   <td className="time-box">{item.st}</td>
-                  <td className="time-box" style={{ color: item.et !== item.st ? "#e53e3e" : "#2d3748" }}>
+
+                  {/* Cột 3: Estimated */}
+                  <td
+                    className="time-box"
+                    style={{ color: item.et !== item.st ? "#e53e3e" : "#334155" }}
+                  >
                     {item.et}
                   </td>
-                  <td className="airport-name">
-                    {item.airportName}
-                    <span style={{ fontSize: "11px", color: "#8c8c8c", marginLeft: "6px" }}>
-                      ({item.tripType === "D" ? "Khởi hành" : "Đến nơi"})
-                    </span>
-                  </td>
-                  <td>{item.airlines}</td>
-                  <td className="flight-no">{item.flightNo}</td>
+
+                  {/* Cột 4: Destination hoặc From (đã bỏ chữ Đến nơi / Khởi hành) */}
+                  <td className="airport-name">{item.airportName}</td>
+
+                  {/* Cột 5: Gate hoặc Baggage */}
                   <td>
                     {item.beltGate ? (
                       <span className="gate-badge">{item.beltGate}</span>
                     ) : (
-                      <span style={{ color: "#bbb" }}>-</span>
+                      <span style={{ color: "#94a3b8" }}>-</span>
                     )}
                   </td>
+
+                  {/* Cột 6: Remarks */}
                   <td>
                     <span className={getBadgeClass(item.remark)}>
                       {item.remark || "On schedule"}
                     </span>
                   </td>
+
+                  {/* Cột 7: Airlines */}
+                  <td>{item.airlines}</td>
                 </tr>
               ))
             ) : (
@@ -322,14 +371,18 @@ export default function FlightDashboard() {
                   {flights.length === 0 ? (
                     <div>
                       <p style={{ marginBottom: "12px", fontSize: "15px" }}>
-                        Chưa có dữ liệu chuyến bay ngày hôm nay trong Firebase!
+                        Chưa có dữ liệu chuyến bay trong Firebase!
                       </p>
-                      <button className="btn-sync" style={{ margin: "0 auto", color: "#00779e", border: "1px solid #00779e" }} onClick={handleTriggerSync}>
+                      <button
+                        className="btn-sync"
+                        style={{ margin: "0 auto", color: "#00779e", border: "1px solid #00779e" }}
+                        onClick={handleTriggerSync}
+                      >
                         <RefreshCw size={14} /> Bấm vào đây để tải dữ liệu từ VIAGS
                       </button>
                     </div>
                   ) : (
-                    "Không tìm thấy chuyến bay phù hợp với bộ lọc."
+                    "Không tìm thấy chuyến bay phù hợp với bộ lọc đã chọn."
                   )}
                 </td>
               </tr>
