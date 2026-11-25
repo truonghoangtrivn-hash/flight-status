@@ -177,7 +177,6 @@ export default function FlightDashboard() {
   const [filterTrip, setFilterTrip] = useState("D");
   const [filterStation, setFilterStation] = useState("DOM");
   const [filterAirline, setFilterAirline] = useState("ALL");
-  const [filterTime, setFilterTime] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
 
   // 1. Lắng nghe trạng thái cập nhật thời gian thực từ đám mây
@@ -222,7 +221,7 @@ export default function FlightDashboard() {
     return () => clearInterval(fr24Timer);
   }, []);
 
-  // 3. Lắng nghe dữ liệu ca trực từ Firestore
+  // 3. Lắng nghe dữ liệu ca trực (03:00 -> 03:00+ hôm sau) từ Firestore
   useEffect(() => {
     setLoading(true);
     const q = query(
@@ -238,6 +237,7 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
+        // Chức năng ca trực 03:00 -> 03:00+ chạy ngầm chuẩn xác
         const opDayFlights = rawList.filter((f) => {
           const st = f.st || "";
           if (f.date === filterDate) {
@@ -249,6 +249,7 @@ export default function FlightDashboard() {
           return false;
         });
 
+        // Khử trùng lặp
         const flightMap = new Map();
 
         opDayFlights.forEach((item) => {
@@ -290,6 +291,7 @@ export default function FlightDashboard() {
           }
         });
 
+        // Khử nhiễu liên danh VASCO / VNA
         const mergedList = Array.from(flightMap.values());
         const vascoDeparted = new Set();
 
@@ -310,6 +312,7 @@ export default function FlightDashboard() {
           return true;
         });
 
+        // Sắp xếp ca trực: 03:00 -> 23:59 rồi đến 00:00 -> 02:59
         finalList.sort((a, b) => {
           const getWeight = (item) => {
             const [h, m] = (item.st || "00:00").split(":").map(Number);
@@ -348,12 +351,6 @@ export default function FlightDashboard() {
         if (!isVna) return false;
       }
 
-      if (filterTime !== "all") {
-        const [start, end] = filterTime.split("-");
-        const flightTime = (f.st || "").replace(":", "");
-        if (flightTime < start || flightTime > end) return false;
-      }
-
       if (searchTerm.trim() !== "") {
         const term = searchTerm.toLowerCase();
         const matchFlt = (f.flightNo || "").toLowerCase().includes(term);
@@ -365,7 +362,7 @@ export default function FlightDashboard() {
 
       return true;
     });
-  }, [flights, filterTrip, filterStation, filterAirline, filterTime, searchTerm]);
+  }, [flights, filterTrip, filterStation, filterAirline, searchTerm]);
 
   const getBadgeClass = (remark = "") => {
     const r = remark.toLowerCase();
@@ -386,17 +383,17 @@ export default function FlightDashboard() {
 
   return (
     <div className="container">
+      {/* Header tinh gọn: Bỏ chữ rườm rà */}
       <div className="header-box">
         <div className="header-title">
           <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
           <p>
-            Ca trực khai thác (03:00 ➜ 03:00+ hôm sau) • Tích hợp VIAGS, TIA
-            {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
-            {lastFR24Time && ` • Radar FR24: ${lastFR24Time} (Tự động 60s/lần)`}
+            Tích hợp VIAGS, TIA
+            {lastSyncTime && ` • Cập nhật: ${lastSyncTime}`}
+            {lastFR24Time && ` • Radar FR24: ${lastFR24Time}`}
           </p>
         </div>
         
-        {/* Nhãn trạng thái tự động 24/7 (Đã loại bỏ nút bấm thủ công) */}
         <div className="header-actions">
           <div
             style={{
@@ -428,7 +425,7 @@ export default function FlightDashboard() {
         </div>
       </div>
 
-      {/* Khung Bộ Lọc */}
+      {/* Khung Bộ Lọc: Đã bỏ ô KHUNG GIỜ, nhãn NGÀY tinh gọn */}
       <div className="filter-card">
         <div className="form-group">
           <label>Chuyến bay</label>
@@ -485,7 +482,7 @@ export default function FlightDashboard() {
         </div>
 
         <div className="form-group">
-          <label>Ngày khai thác</label>
+          <label>Ngày</label>
           <input
             type="date"
             className="form-control"
@@ -494,24 +491,7 @@ export default function FlightDashboard() {
           />
         </div>
 
-        <div className="form-group">
-          <label>Khung giờ</label>
-          <select
-            className="form-control"
-            value={filterTime}
-            onChange={(e) => setFilterTime(e.target.value)}
-          >
-            <option value="all">Toàn bộ ca trực (03:00 - 03:00+)</option>
-            <option value="0300-0659">03:00 - 07:00 (Sáng sớm)</option>
-            <option value="0700-1159">07:00 - 12:00 (Buổi sáng)</option>
-            <option value="1200-1659">12:00 - 17:00 (Buổi chiều)</option>
-            <option value="1700-2159">17:00 - 22:00 (Buổi tối)</option>
-            <option value="2200-2359">22:00 - 24:00 (Đêm)</option>
-            <option value="0000-0259">00:00 - 03:00 (Rạng sáng D+1)</option>
-          </select>
-        </div>
-
-        <div className="form-group" style={{ flex: 1, minWidth: "180px" }}>
+        <div className="form-group" style={{ flex: 1, minWidth: "220px" }}>
           <label>Tìm kiếm</label>
           <input
             type="text"
@@ -523,10 +503,10 @@ export default function FlightDashboard() {
         </div>
       </div>
 
+      {/* Dòng Thống kê tinh gọn: Bỏ chữ Ca trực và giải thích ngày */}
       <div className="stats-bar">
         <span>
-          Ca trực ngày <strong>{filterDate}</strong> (đến trước 03:00 sáng {nextDateStr}): Đang hiển thị{" "}
-          <strong>{filteredFlights.length}</strong> chuyến bay
+          Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
         </span>
       </div>
 
@@ -552,7 +532,7 @@ export default function FlightDashboard() {
               <tr>
                 <td colSpan="8" className="empty-state">
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}>
-                    Đang tải dữ liệu ca trực...
+                    Đang tải dữ liệu...
                   </div>
                 </td>
               </tr>
@@ -669,7 +649,7 @@ export default function FlightDashboard() {
             ) : (
               <tr>
                 <td colSpan="8" className="empty-state">
-                  Không tìm thấy chuyến bay phù hợp với ca trực này.
+                  Không tìm thấy chuyến bay phù hợp.
                 </td>
               </tr>
             )}
