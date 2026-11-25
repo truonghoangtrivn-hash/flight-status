@@ -1,8 +1,10 @@
+// Bỏ qua lỗi lệch tên miền chứng chỉ SSL của VIAGS
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
-import { doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, writeBatch } from "firebase/firestore";
 
-// Cho phép xử lý tối đa 60 giây trên Vercel Serverless
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -25,15 +27,15 @@ async function handleSync(request) {
   try {
     const { searchParams } = new URL(request.url);
 
-    // Mặc định lấy ngày hôm nay theo múi giờ Việt Nam (UTC+7)
+    // Ngày hôm nay theo múi giờ Việt Nam (UTC+7)
     const todayVn = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Ho_Chi_Minh",
     }).format(new Date());
 
     const targetDate = searchParams.get("date") || todayVn;
 
-    // 1. Tải trang ban đầu để lấy Cookie và mã xác thực ASP.NET (__VIEWSTATE, __EVENTVALIDATION)
-    const initialRes = await fetch("https://viags.vn/en-US/flight-schedules", {
+    // 1. Tải trang ban đầu từ www.viags.vn để lấy Cookie và mã xác thực ASP.NET
+    const initialRes = await fetch("https://www.viags.vn/en-US/flight-schedules", {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -51,7 +53,7 @@ async function handleSync(request) {
     const viewStateGenerator = getInputValue(initHtml, "__VIEWSTATEGENERATOR") || "CA0B0334";
     const eventValidation = getInputValue(initHtml, "__EVENTVALIDATION");
 
-    // 2. Định nghĩa 4 danh mục cần quét tại Hồ Chí Minh (SGN)
+    // 2. Định nghĩa 4 nhóm cần quét tại Hồ Chí Minh (SGN)
     const scanTasks = [
       { station: "DOM", trip: "D", stationName: "Domestic", tripName: "Departures" },
       { station: "DOM", trip: "A", stationName: "Domestic", tripName: "Arrivals" },
@@ -61,7 +63,7 @@ async function handleSync(request) {
 
     let allFlights = [];
 
-    // 3. Thực hiện gửi yêu cầu lấy dữ liệu cho từng danh mục
+    // 3. Quét từng nhóm dữ liệu
     for (const task of scanTasks) {
       const formData = new URLSearchParams();
       formData.append(
@@ -80,10 +82,10 @@ async function handleSync(request) {
       formData.append("ctl00$mainContent$ctl00$ddlTrip", task.trip);
       formData.append("ctl00$mainContent$ctl00$ddlOriginal", "SGN"); // Cố định TP. Hồ Chí Minh
       formData.append("ctl00$mainContent$ctl00$datetimepicker1", targetDate);
-      formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359"); // Cả ngày
+      formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
       formData.append("__ASYNCPOST", "true");
 
-      const response = await fetch("https://viags.vn/en-US/flight-schedules", {
+      const response = await fetch("https://www.viags.vn/en-US/flight-schedules", {
         method: "POST",
         headers: {
           "User-Agent":
@@ -91,7 +93,7 @@ async function handleSync(request) {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           "X-MicrosoftAjax": "Delta=true",
           Cookie: cookie,
-          Referer: "https://viags.vn/en-US/flight-schedules",
+          Referer: "https://www.viags.vn/en-US/flight-schedules",
         },
         body: formData.toString(),
         cache: "no-store",
@@ -125,12 +127,12 @@ async function handleSync(request) {
           }));
           allFlights.push(...mapped);
         } catch (err) {
-          console.error("Lỗi parse JSON danh mục:", task, err);
+          console.error("Lỗi parse JSON:", task, err);
         }
       }
     }
 
-    // 4. Lưu dữ liệu hàng loạt vào Firestore theo từng đợt (Batch tối đa 400 mục)
+    // 4. Lưu dữ liệu hàng loạt vào Firestore
     let totalUpdated = 0;
     const chunkSize = 400;
     for (let i = 0; i < allFlights.length; i += chunkSize) {
