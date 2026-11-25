@@ -1,6 +1,6 @@
 import puppeteer from "puppeteer";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, doc, writeBatch } from "firebase/firestore";
+import { getFirestore, collection, query, where, getDocs, doc, writeBatch } from "firebase/firestore";
 
 // Cấu hình Firebase
 const firebaseConfig = {
@@ -15,7 +15,6 @@ const firebaseConfig = {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Hàm chuẩn hóa tên sân bay sang tiếng Anh viết hoa không dấu
 function normalizeAirport(name = "") {
   if (!name) return "";
   return name
@@ -23,11 +22,24 @@ function normalizeAirport(name = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
+    .replace(/[-_.,]/g, " ")
+    .replace(/\s+/g, " ")
     .toUpperCase()
     .trim();
 }
 
-// 4 liên kết FIDS của TIA
+function formatVnTime(timestampSec) {
+  if (!timestampSec) return null;
+  const d = new Date(timestampSec * 1000);
+  return d.toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+// 4 liên kết TIA
 const TIA_TARGETS = [
   { url: "https://tia.vietnamairport.vn/Depdom", tripType: "D", stationType: "DOM", name: "Đi Quốc Nội" },
   { url: "https://tia.vietnamairport.vn/Depint", tripType: "D", stationType: "INT", name: "Đi Quốc Tế" },
@@ -35,7 +47,7 @@ const TIA_TARGETS = [
   { url: "https://tia.vietnamairport.vn/arrint", tripType: "A", stationType: "INT", name: "Đến Quốc Tế" },
 ];
 
-async function scrapePage(browser, target) {
+async function scrapeTIA(browser, target) {
   const page = await browser.newPage();
   await page.setUserAgent(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -80,7 +92,6 @@ async function scrapePage(browser, target) {
         const remark = getCol(7);
 
         if (flightNoRaw) {
-          // Bóc tách chuyến bay chính nếu có liên danh (ví dụ "GA 9610, KL 3855" -> lấy "GA9610")
           const mainFlight = flightNoRaw.split(",")[0].trim();
           const cleanFlt = mainFlight.replace(/\s+/g, "").toUpperCase();
 
@@ -89,7 +100,7 @@ async function scrapePage(browser, target) {
             etd: etd || std,
             airportName,
             cleanFlightNo: cleanFlt,
-            displayFlightNo: flightNoRaw, // Giữ nguyên chuỗi hiển thị
+            displayFlightNo: flightNoRaw,
             terminal,
             checkinRow,
             beltGate,
@@ -101,29 +112,122 @@ async function scrapePage(browser, target) {
     });
   }
 
-  // Đợt 1
   const b1 = await collectRows();
   b1.forEach((f) => flightsMap.set(f.cleanFlightNo, f));
 
-  // Chờ 12 giây để bảng lật trang
   console.log(`[TIA] Chờ 12s để bảng lật trang...`);
   await new Promise((r) => setTimeout(r, 12000));
 
-  // Đợt 2
   const b2 = await collectRows();
   b2.forEach((f) => flightsMap.set(f.cleanFlightNo, f));
 
   await page.close();
 
-  const results = Array.from(flightsMap.values()).map((f) => ({
+  return Array.from(flightsMap.values()).map((f) => ({
     ...f,
     tripType: target.tripType,
     stationType: target.stationType,
     normalizedAirport: normalizeAirport(f.airportName),
   }));
+}
 
-  console.log(`[TIA] Đã bóc tách được ${results.length} chuyến bay từ ${target.name}`);
-  return results;
+// HÀM CÀO DỮ LIỆU FLIGHTRADAR24 DÀNH CHO CHUYẾN BAY ĐẾN SÂN BAY TÂN SƠN NHẤT (SGN ARRIVALS)
+async function scrapeFlightradar24(browser) {
+  console.log("=== [FLIGHTRADAR24] BẮT ĐẦU CÀO GIỜ DỰ ĐÁP (ETA) TÂN SƠN NHẤT ===");
+  const frPage = await browser.newPage();
+  await frPage.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  );
+
+  const frMap = new Map();
+
+  try {
+    // 1. Thử gọi trực tiếp cổng API JSON của Flightradar24
+    await frPage.goto("https://www.flightradar24.com/data/airports/sgn/arrivals", {
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
+    });
+
+    const apiResult = await frPage.evaluate(async () => {
+      try {
+        const response = await fetch(
+          "https://api.flightradar24.com/common/v1/airport.json?code=sgn&plugin[]=&plugin-setting[schedule][mode]=arrivals&page=1&limit=100",
+          {
+            headers: {
+              Accept: "application/json",
+            },
+          }
+        );
+        return await response.json();
+      } catch (e) {
+        return null;
+      }
+    });
+
+    if (
+      apiResult &&
+      apiResult.result &&
+      apiResult.result.response &&
+      apiResult.result.response.airport &&
+      apiResult.result.response.airport.pluginData &&
+      apiResult.result.response.airport.pluginData.schedule &&
+      apiResult.result.response.airport.pluginData.schedule.arrivals
+    ) {
+      const arrivals = apiResult.result.response.airport.pluginData.schedule.arrivals.data || [];
+      console.log(`[FR24] Nhận được ${arrivals.length} chuyến bay đến từ API Flightradar24`);
+
+      arrivals.forEach((item) => {
+        const flt = item.flight;
+        if (!flt || !flt.identification || !flt.identification.number) return;
+        const flightNo = (flt.identification.number.default || "").replace(/\s+/g, "").toUpperCase();
+
+        // Lấy giờ dự đáp (ETA): Ưu tiên estimated arrival, nếu đã hạ cánh thì lấy real arrival
+        let etaSec = null;
+        if (flt.time && flt.time.estimated && flt.time.estimated.arrival) {
+          etaSec = flt.time.estimated.arrival;
+        } else if (flt.time && flt.time.real && flt.time.real.arrival) {
+          etaSec = flt.time.real.arrival;
+        }
+
+        const etaFormatted = formatVnTime(etaSec);
+        if (flightNo && etaFormatted) {
+          frMap.set(flightNo, etaFormatted);
+        }
+      });
+    } else {
+      // 2. Dự phòng: Đọc trực tiếp từ bảng HTML của Flightradar24 nếu API bị chặn
+      console.log("[FR24] Chuyển sang đọc trực tiếp bảng DOM Flightradar24...");
+      const tableData = await frPage.evaluate(() => {
+        const rows = document.querySelectorAll("table#tbl-datatable tbody tr");
+        const list = [];
+        rows.forEach((row) => {
+          const fltLink = row.querySelector("a[data-flight]");
+          const statusCell = row.querySelector("td.cell-status");
+          if (fltLink && statusCell) {
+            const flight = fltLink.innerText.trim().replace(/\s+/g, "").toUpperCase();
+            const text = statusCell.innerText.trim();
+            // Bóc tách giờ (ví dụ "Estimated 23:00" hoặc "Landed 22:50" hoặc "11:00 PM")
+            const timeMatch = text.match(/(\d{1,2}:\d{2})/);
+            if (flight && timeMatch) {
+              list.push({ flight, eta: timeMatch[1] });
+            }
+          }
+        });
+        return list;
+      });
+
+      tableData.forEach((item) => {
+        frMap.set(item.flight, item.eta);
+      });
+    }
+  } catch (err) {
+    console.error("[FR24] Lỗi khi cào Flightradar24:", err.message);
+  } finally {
+    await frPage.close();
+  }
+
+  console.log(`[FR24] Đã trích xuất thành công ETA của ${frMap.size} chuyến bay đến từ Flightradar24`);
+  return frMap;
 }
 
 async function main() {
@@ -131,81 +235,26 @@ async function main() {
     timeZone: "Asia/Ho_Chi_Minh",
   }).format(new Date());
 
-  console.log(`=== BẮT ĐẦU CÀO DỮ LIỆU TIA FIDS (NGÀY: ${todayVn}) ===`);
+  console.log(`=== BẮT ĐẦU CÀO DỮ LIỆU TIA & FLIGHTRADAR24 (NGÀY: ${todayVn}) ===`);
 
   const browser = await puppeteer.launch({
     headless: "new",
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
-  let allFlights = [];
-
+  // 1. Cào 4 trang TIA
+  let allTIA = [];
   for (const target of TIA_TARGETS) {
     try {
-      const items = await scrapePage(browser, target);
-      allFlights.push(...items);
+      const items = await scrapeTIA(browser, target);
+      allTIA.push(...items);
     } catch (err) {
       console.error(`Lỗi cào ${target.name}:`, err);
     }
   }
 
-  await browser.close();
-  console.log(`=== TỔNG CỘNG THU THẬP: ${allFlights.length} chuyến bay từ TIA ===`);
-
-  if (allFlights.length === 0) {
-    console.log("Không có dữ liệu mới để lưu.");
-    process.exit(0);
-  }
-
-  // Hợp nhất dữ liệu vào Firestore
-  const batch = writeBatch(db);
-  for (const f of allFlights) {
-    const timeKey = (f.std || "").replace(/[^0-9]/g, "");
-    // Khóa định danh chuẩn hóa: Ngày_Hướng_MãBayChuẩn_GiờChuẩn
-    const docId = `${todayVn}_${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
-
-    const flightRef = doc(db, "flights_sgn", docId);
-
-    // Ghi đè ưu tiên từ TIA: Cửa, Trạng thái, Quầy, Nhà ga và Tên điểm đến viết hoa
-    const updateData = {
-      date: todayVn,
-      stationType: f.stationType,
-      tripType: f.tripType,
-      flightNo: f.cleanFlightNo,
-      displayFlightNo: f.displayFlightNo,
-      st: f.std,
-      et: f.etd,
-      airportName: f.normalizedAirport, // Chuẩn hóa viết hoa quốc tế (HA NOI, DA NANG...)
-      terminal: f.terminal,
-      checkinRow: f.checkinRow,
-      beltGate: f.beltGate,
-      remark: f.remark,
-      hasTIAData: true, // Đánh dấu cờ TIA để VIAGS không ghi đè Gate & Remark
-      source: "TIA_ACV",
-      updatedAt: new Date().toISOString(),
-    };
-
-    batch.set(flightRef, updateData, { merge: true });
-  }
-
-  // Cập nhật trạng thái
-  const metaRef = doc(db, "meta", "sync_status");
-  batch.set(
-    metaRef,
-    {
-      lastUpdated: new Date().toISOString(),
-      totalFlightsTIA: allFlights.length,
-      source: "HYBRID (VIAGS + TIA)",
-    },
-    { merge: true }
-  );
-
-  await batch.commit();
-  console.log("=== ĐÃ CẬP NHẬT HỢP NHẤT THÀNH CÔNG VÀO FIREBASE! ===");
-  process.exit(0);
-}
-
-main().catch((err) => {
-  console.error("Lỗi:", err);
-  process.exit(1);
-});
+  // 2. Cào giờ dự đáp từ Flightradar24
+  let fr24Map = new Map();
+  try {
+    fr24Map = await scrapeFlightradar24(browser);
+  } catch (err) {
