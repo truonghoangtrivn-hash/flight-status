@@ -1,12 +1,55 @@
-// Bỏ qua lỗi lệch tên miền chứng chỉ SSL của VIAGS
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebase";
 import { doc, writeBatch } from "firebase/firestore";
+import https from "node:https";
+import http from "node:http";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
+
+// Hàm gọi HTTP/HTTPS tùy chỉnh - Bỏ qua 100% lỗi sai lệch chứng chỉ SSL của VIAGS
+function requestViags(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const isHttps = urlObj.protocol === "https:";
+    const lib = isHttps ? https : http;
+
+    const reqOptions = {
+      method: options.method || "GET",
+      headers: options.headers || {},
+      agent: isHttps
+        ? new https.Agent({ rejectUnauthorized: false, keepAlive: true })
+        : undefined,
+    };
+
+    const req = lib.request(url, reqOptions, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        resolve({
+          status: res.statusCode,
+          headers: {
+            get: (name) => {
+              const val = res.headers[name.toLowerCase()];
+              if (Array.isArray(val)) return val.join("; ");
+              return val || "";
+            },
+          },
+          text: async () => data,
+        });
+      });
+    });
+
+    req.on("error", (err) => reject(err));
+
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
 
 function getInputValue(html, name) {
   const match =
@@ -35,14 +78,13 @@ async function handleSync(request) {
     const targetDate = searchParams.get("date") || todayVn;
 
     // 1. Tải trang ban đầu từ www.viags.vn để lấy Cookie và mã xác thực ASP.NET
-    const initialRes = await fetch("https://www.viags.vn/en-US/flight-schedules", {
+    const initialRes = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
       },
-      cache: "no-store",
     });
 
     const initHtml = await initialRes.text();
@@ -85,7 +127,7 @@ async function handleSync(request) {
       formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
       formData.append("__ASYNCPOST", "true");
 
-      const response = await fetch("https://www.viags.vn/en-US/flight-schedules", {
+      const response = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
         method: "POST",
         headers: {
           "User-Agent":
@@ -96,7 +138,6 @@ async function handleSync(request) {
           Referer: "https://www.viags.vn/en-US/flight-schedules",
         },
         body: formData.toString(),
-        cache: "no-store",
       });
 
       const text = await response.text();
