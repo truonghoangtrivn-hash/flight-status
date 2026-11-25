@@ -1,0 +1,30 @@
+name: Auto Sync TIA Airport Flights
+
+on:
+  schedule:
+    # Tự động chạy mỗi 15 phút một lần suốt 24/7
+    - cron: '*/15 * * * *'
+  # Cho phép bạn bấm nút chạy thủ công bất cứ lúc nào trên GitHub
+  workflow_dispatch:
+
+jobs:
+  scrape-tia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 1. Tải mã nguồn dự án
+        uses: actions/checkout@v4
+
+      - name: 2. Cài đặt môi trường Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 3. Cài đặt Puppeteer và Firebase
+        run: |
+          npm install puppeteer firebase
+
+      - name: 4. Chạy cào dữ liệu TIA và đẩy vào Firebase
+        run: |
+          node scripts/crawl-tia.mjs
