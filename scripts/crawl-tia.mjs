@@ -15,7 +15,19 @@ const firebaseConfig = {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// 4 liên kết FIDS chính thức của TIA
+// Hàm chuẩn hóa tên sân bay sang tiếng Anh viết hoa không dấu
+function normalizeAirport(name = "") {
+  if (!name) return "";
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toUpperCase()
+    .trim();
+}
+
+// 4 liên kết FIDS của TIA
 const TIA_TARGETS = [
   { url: "https://tia.vietnamairport.vn/Depdom", tripType: "D", stationType: "DOM", name: "Đi Quốc Nội" },
   { url: "https://tia.vietnamairport.vn/Depint", tripType: "D", stationType: "INT", name: "Đi Quốc Tế" },
@@ -30,7 +42,7 @@ async function scrapePage(browser, target) {
   );
   await page.setViewport({ width: 1920, height: 1080 });
 
-  console.log(`[TIA] Đang mở trang: ${target.name} (${target.url})...`);
+  console.log(`[TIA] Đang mở trang: ${target.name}...`);
   try {
     await page.goto(target.url, { waitUntil: "networkidle2", timeout: 45000 });
   } catch (e) {
@@ -61,19 +73,23 @@ async function scrapePage(browser, target) {
         const std = getCol(0);
         const etd = getCol(1);
         const airportName = getCol(2);
-        const flightNo = getCol(3);
+        const flightNoRaw = getCol(3);
         const terminal = getCol(4);
         const checkinRow = getCol(5);
         const beltGate = getCol(6);
         const remark = getCol(7);
 
-        if (flightNo) {
+        if (flightNoRaw) {
+          // Bóc tách chuyến bay chính nếu có liên danh (ví dụ "GA 9610, KL 3855" -> lấy "GA9610")
+          const mainFlight = flightNoRaw.split(",")[0].trim();
+          const cleanFlt = mainFlight.replace(/\s+/g, "").toUpperCase();
+
           list.push({
             std,
             etd: etd || std,
             airportName,
-            flightNo: flightNo.replace(/\s+/g, ""),
-            displayFlightNo: flightNo,
+            cleanFlightNo: cleanFlt,
+            displayFlightNo: flightNoRaw, // Giữ nguyên chuỗi hiển thị
             terminal,
             checkinRow,
             beltGate,
@@ -87,15 +103,15 @@ async function scrapePage(browser, target) {
 
   // Đợt 1
   const b1 = await collectRows();
-  b1.forEach((f) => flightsMap.set(f.flightNo, f));
+  b1.forEach((f) => flightsMap.set(f.cleanFlightNo, f));
 
-  // Chờ 12 giây để TIA tự lật sang trang tiếp theo (ví dụ trang 2/2)
-  console.log(`[TIA] Chờ 12s để bảng lật sang trang 2/2...`);
+  // Chờ 12 giây để bảng lật trang
+  console.log(`[TIA] Chờ 12s để bảng lật trang...`);
   await new Promise((r) => setTimeout(r, 12000));
 
   // Đợt 2
   const b2 = await collectRows();
-  b2.forEach((f) => flightsMap.set(f.flightNo, f));
+  b2.forEach((f) => flightsMap.set(f.cleanFlightNo, f));
 
   await page.close();
 
@@ -103,9 +119,10 @@ async function scrapePage(browser, target) {
     ...f,
     tripType: target.tripType,
     stationType: target.stationType,
+    normalizedAirport: normalizeAirport(f.airportName),
   }));
 
-  console.log(`[TIA] Đã bóc tách thành công ${results.length} chuyến bay từ ${target.name}`);
+  console.log(`[TIA] Đã bóc tách được ${results.length} chuyến bay từ ${target.name}`);
   return results;
 }
 
@@ -143,33 +160,32 @@ async function main() {
   // Hợp nhất dữ liệu vào Firestore
   const batch = writeBatch(db);
   for (const f of allFlights) {
-    const docId = `${todayVn}_${f.stationType}_${f.tripType}_${f.flightNo}_${f.std || ""}`.replace(
-      /[^a-zA-Z0-9_-]/g,
-      "_"
-    );
+    const timeKey = (f.std || "").replace(/[^0-9]/g, "");
+    // Khóa định danh chuẩn hóa: Ngày_Hướng_MãBayChuẩn_GiờChuẩn
+    const docId = `${todayVn}_${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
 
     const flightRef = doc(db, "flights_sgn", docId);
 
-    // merge: true giúp giữ lại tên Hãng bay (nếu VIAGS đã có) và bổ sung thêm Terminal, Row từ TIA
-    batch.set(
-      flightRef,
-      {
-        date: todayVn,
-        stationType: f.stationType,
-        tripType: f.tripType,
-        flightNo: f.displayFlightNo,
-        st: f.std,
-        et: f.etd,
-        airportName: f.airportName,
-        terminal: f.terminal,
-        checkinRow: f.checkinRow,
-        beltGate: f.beltGate,
-        remark: f.remark,
-        source: "TIA_ACV",
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    // Ghi đè ưu tiên từ TIA: Cửa, Trạng thái, Quầy, Nhà ga và Tên điểm đến viết hoa
+    const updateData = {
+      date: todayVn,
+      stationType: f.stationType,
+      tripType: f.tripType,
+      flightNo: f.cleanFlightNo,
+      displayFlightNo: f.displayFlightNo,
+      st: f.std,
+      et: f.etd,
+      airportName: f.normalizedAirport, // Chuẩn hóa viết hoa quốc tế (HA NOI, DA NANG...)
+      terminal: f.terminal,
+      checkinRow: f.checkinRow,
+      beltGate: f.beltGate,
+      remark: f.remark,
+      hasTIAData: true, // Đánh dấu cờ TIA để VIAGS không ghi đè Gate & Remark
+      source: "TIA_ACV",
+      updatedAt: new Date().toISOString(),
+    };
+
+    batch.set(flightRef, updateData, { merge: true });
   }
 
   // Cập nhật trạng thái
