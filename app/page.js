@@ -37,194 +37,64 @@ const AIRLINE_DICT = {
   FD: "THAI AIRASIA",
 };
 
-// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN (CHÍNH XÁC THEO MỌI CÁCH VIẾT CỦA VIAGS & TIA)
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN
 const IATA_MAP = {
-  // --- VIỆT NAM (NỘI ĐỊA) ---
-  "HA NOI": "HAN",
-  HANOI: "HAN",
-  "NOI BAI": "HAN",
-  HUE: "HUI",
-  "PHU BAI": "HUI",
-  "THANH HOA": "THD",
-  "THO XUAN": "THD",
+  // Nội địa
+  "HA NOI": "HAN", HANOI: "HAN", "NOI BAI": "HAN",
+  HUE: "HUI", "PHU BAI": "HUI",
+  "THANH HOA": "THD", "THO XUAN": "THD",
   VINH: "VII",
-  "DA NANG": "DAD",
-  DANANG: "DAD",
-  "HAI PHONG": "HPH",
-  "CAT BI": "HPH",
-  "PHU QUOC": "PQC",
-  PHUQUOC: "PQC",
-  "CAM RANH": "CXR",
-  "NHA TRANG": "CXR",
-  "CON DAO": "VCS",
-  CONDAO: "VCS",
+  "DA NANG": "DAD", DANANG: "DAD",
+  "HAI PHONG": "HPH", "CAT BI": "HPH",
+  "PHU QUOC": "PQC", PHUQUOC: "PQC",
+  "CAM RANH": "CXR", "NHA TRANG": "CXR",
+  "CON DAO": "VCS", CONDAO: "VCS",
   PLEIKU: "PXU",
-  "QUY NHON": "UIH",
-  "PHU CAT": "UIH",
-  "BUON ME THUOT": "BMV",
-  "BUON MA THUOT": "BMV",
-  "DA LAT": "DLI",
-  DALAT: "DLI",
-  "LIEN KHUONG": "DLI",
-  "TUY HOA": "TBB",
-  "DONG TAC": "TBB",
-  "CHU LAI": "VCL",
-  "DONG HOI": "VDH",
-  "CA MAU": "CAH",
-  "CAN THO": "VCA",
-  "RACH GIA": "VKG",
-  "DIEN BIEN": "DIN",
-  "VAN DON": "VDO",
-  "QUANG NINH": "VDO",
+  "QUY NHON": "UIH", "PHU CAT": "UIH",
+  "BUON ME THUOT": "BMV", "BUON MA THUOT": "BMV",
+  "DA LAT": "DLI", DALAT: "DLI", "LIEN KHUONG": "DLI",
+  "TUY HOA": "TBB", "DONG TAC": "TBB",
+  "CHU LAI": "VCL", "DONG HOI": "VDH",
+  "CA MAU": "CAH", "CAN THO": "VCA",
+  "RACH GIA": "VKG", "DIEN BIEN": "DIN",
+  "VAN DON": "VDO", "QUANG NINH": "VDO",
 
-  // --- TRUNG QUỐC & HỒNG KÔNG, ĐÀI LOAN ---
-  SHENZHEN: "SZX",
-  SHENZEN: "SZX",
-  "BEIJING CHINA": "PEK",
-  "BEIJING-CHINA": "PEK",
-  BEIJING: "PEK",
-  "BEIJING CAPITAL": "PEK",
-  "BEIJING DAXING": "PKX",
-  DAXING: "PKX",
-  SHANGHAI: "PVG",
-  PUDONG: "PVG",
-  HONGQIAO: "SHA",
-  GUANGZHOU: "CAN",
-  KUNMING: "KMG",
-  NANJING: "NKG",
-  CHENGDU: "TFU",
-  CHONGQING: "CKG",
-  HANGZHOU: "HGH",
-  WUHAN: "WUH",
-  XIAMEN: "XMN",
-  QINGDAO: "TAO",
-  JINAN: "TNA",
-  SANYA: "SYX",
-  HAIKOU: "HAK",
-  NANNING: "NNG",
-  ZHENGZHOU: "CGO",
-  CHANGSHA: "CSX",
-  TIANJIN: "TSN",
-  HONGKONG: "HKG",
-  "HONG KONG": "HKG",
-  MACAU: "MFM",
-  MACAO: "MFM",
-  TAIPEI: "TPE",
-  TAOYUAN: "TPE",
-  KAOHSIUNG: "KHH",
-  TAICHUNG: "RMQ",
-
-  // --- ĐÔNG NAM Á ---
-  "SIEM RIEP": "SAI",
-  "SIEM REAP": "SAI",
-  SIEMREAP: "SAI",
-  SIEMRIEP: "SAI",
-  "PHNOM PENH": "PNH",
-  PHNOMPENH: "PNH",
-  SIHANOUKVILLE: "KOS",
-  BANGKOK: "BKK",
-  SUVARNABHUMI: "BKK",
-  "DON MUEANG": "DMK",
-  "DON MUANG": "DMK",
-  PHUKET: "HKT",
-  "CHIANG MAI": "CNX",
-  SINGAPORE: "SIN",
-  CHANGI: "SIN",
-  "KUALA LUMPUR": "KUL",
-  KUALALUMPUR: "KUL",
-  PENANG: "PEN",
-  KUCHING: "KCH",
-  JAKARTA: "CGK",
-  SEMARANG: "SRG",
-  BALI: "DPS",
-  DENPASAR: "DPS",
-  SURABAYA: "SUB",
-  MANILA: "MNL",
-  CEBU: "CEB",
-  CLARK: "CRK",
-  VIENTIANE: "VTE",
-  "LUANG PRABANG": "LPQ",
-  YANGON: "RGN",
-  BRUNEI: "BWN",
-
-  // --- NHẬT BẢN & HÀN QUỐC ---
-  TOKYO: "HND",
-  HANEDA: "HND",
-  "HANEDA-TOKYO, JAPAN": "HND",
-  "HANEDA-TOKYO": "HND",
-  NARITA: "NRT",
-  OSAKA: "KIX",
-  KANSAI: "KIX",
-  NAGOYA: "NGO",
-  FUKUOKA: "FUK",
-  SAPPORO: "CTS",
-  OKINAWA: "OKA",
-  SEOUL: "ICN",
-  INCHEON: "ICN",
-  ANAA: "ICN", // Chuyến DL7926 (liên danh KE476) đi Incheon
-  GIMPO: "GMP",
-  BUSAN: "PUS",
-  DAEGU: "TAE",
-  JEJU: "CJU",
-
-  // --- CHÂU ÂU, NGA, TRUNG ĐÔNG, TRUNG Á ---
-  COPENHAGEN: "CPH",
-  KOBENHAVN: "CPH",
-  MUENCHEN: "MUC",
-  MUNICH: "MUC",
-  PARIS: "CDG",
-  FRANKFURT: "FRA",
-  LONDON: "LHR",
-  HEATHROW: "LHR",
-  GATWICK: "LGW",
-  AMSTERDAM: "AMS",
-  ASHKHABAD: "ASB",
-  ASHGABAT: "ASB",
-  MOSCOW: "SVO",
-  BARNAUL: "BAX",
-  NOVOSIBIRSK: "OVB",
-  ALMATY: "ALA",
-  TASHKENT: "TAS",
-  ISTANBUL: "IST",
-  DOHA: "DOH",
-  DUBAI: "DXB",
-  "ABU DHABI": "AUH",
-
-  // --- NAM Á ---
-  BOMBAY: "BOM",
-  MUMBAI: "BOM",
-  "MUMBAI, INDIA": "BOM",
-  DELHI: "DEL",
-  "NEW DELHI": "DEL",
-  BENGALURU: "BLR",
-  BANGALORE: "BLR",
-  CHENNAI: "MAA",
-  KOLKATA: "CCU",
-  COLOMBO: "CMB",
-
-  // --- CHÂU ÚC & HOA KỲ ---
-  SYDNEY: "SYD",
-  MELBOURNE: "MEL",
-  BRISBANE: "BNE",
-  PERTH: "PER",
-  ADELAIDE: "ADL",
-  AUCKLAND: "AKL",
-  HONOLULU: "HNL",
-  "SAN FRANCISCO": "SFO",
-  SANFRANCISCO: "SFO",
-  "LOS ANGELES": "LAX",
-  LOSANGELES: "LAX",
-  SEATTLE: "SEA",
-  "NEW YORK": "JFK",
+  // Quốc tế
+  SHENZHEN: "SZX", SHENZEN: "SZX",
+  "BEIJING CHINA": "PEK", "BEIJING-CHINA": "PEK", BEIJING: "PEK", "BEIJING CAPITAL": "PEK",
+  "BEIJING DAXING": "PKX", DAXING: "PKX",
+  SHANGHAI: "PVG", PUDONG: "PVG", HONGQIAO: "SHA",
+  GUANGZHOU: "CAN", KUNMING: "KMG", NANJING: "NKG", CHENGDU: "TFU", CHONGQING: "CKG",
+  HANGZHOU: "HGH", WUHAN: "WUH", XIAMEN: "XMN", QINGDAO: "TAO", JINAN: "TNA",
+  SANYA: "SYX", HAIKOU: "HAK", NANNING: "NNG", ZHENGZHOU: "CGO", CHANGSHA: "CSX",
+  HONGKONG: "HKG", "HONG KONG": "HKG", MACAU: "MFM", MACAO: "MFM",
+  TAIPEI: "TPE", TAOYUAN: "TPE", KAOHSIUNG: "KHH", TAICHUNG: "RMQ",
+  "SIEM RIEP": "SAI", "SIEM REAP": "SAI", SIEMREAP: "SAI", SIEMRIEP: "SAI",
+  "PHNOM PENH": "PNH", PHNOMPENH: "PNH", SIHANOUKVILLE: "KOS",
+  BANGKOK: "BKK", SUVARNABHUMI: "BKK", "DON MUEANG": "DMK", "DON MUANG": "DMK",
+  PHUKET: "HKT", "CHIANG MAI": "CNX",
+  SINGAPORE: "SIN", CHANGI: "SIN", "KUALA LUMPUR": "KUL", KUALALUMPUR: "KUL",
+  PENANG: "PEN", KUCHING: "KCH",
+  JAKARTA: "CGK", SEMARANG: "SRG", BALI: "DPS", DENPASAR: "DPS", SURABAYA: "SUB",
+  MANILA: "MNL", CEBU: "CEB", CLARK: "CRK",
+  VIENTIANE: "VTE", "LUANG PRABANG": "LPQ", YANGON: "RGN", BRUNEI: "BWN",
+  TOKYO: "HND", HANEDA: "HND", "HANEDA-TOKYO, JAPAN": "HND", "HANEDA-TOKYO": "HND",
+  NARITA: "NRT", OSAKA: "KIX", KANSAI: "KIX", NAGOYA: "NGO", FUKUOKA: "FUK",
+  SEOUL: "ICN", INCHEON: "ICN", ANAA: "ICN", GIMPO: "GMP", BUSAN: "PUS", DAEGU: "TAE", JEJU: "CJU",
+  COPENHAGEN: "CPH", KOBENHAVN: "CPH", MUENCHEN: "MUC", MUNICH: "MUC",
+  PARIS: "CDG", FRANKFURT: "FRA", LONDON: "LHR", AMSTERDAM: "AMS",
+  ASHKHABAD: "ASB", ASHGABAT: "ASB", MOSCOW: "SVO", BARNAUL: "BAX", NOVOSIBIRSK: "OVB",
+  ALMATY: "ALA", TASHKENT: "TAS", ISTANBUL: "IST", DOHA: "DOH", DUBAI: "DXB",
+  BOMBAY: "BOM", MUMBAI: "BOM", "MUMBAI, INDIA": "BOM", DELHI: "DEL", "NEW DELHI": "DEL",
+  BENGALURU: "BLR", CHENNAI: "MAA", KOLKATA: "CCU", COLOMBO: "CMB",
+  SYDNEY: "SYD", MELBOURNE: "MEL", BRISBANE: "BNE", PERTH: "PER", AUCKLAND: "AKL",
+  HONOLULU: "HNL", "SAN FRANCISCO": "SFO", SANFRANCISCO: "SFO", "LOS ANGELES": "LAX",
 };
 
-// Sắp xếp các từ khóa theo độ dài từ dài đến ngắn để so khớp chính xác nhất
 const SORTED_IATA_KEYS = Object.keys(IATA_MAP).sort((a, b) => b.length - a.length);
 
-// Hàm chuyển đổi sang IATA chuẩn
 function toIATA(name = "") {
   if (!name) return "";
-  // Xóa bỏ dấu gạch ngang, dấu phẩy, khoảng trắng dư thừa
   let clean = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -235,31 +105,20 @@ function toIATA(name = "") {
     .toUpperCase()
     .trim();
 
-  // Nếu bản thân nó đã là mã IATA 3 chữ cái
-  if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) {
-    return clean;
-  }
+  if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) return clean;
+  if (IATA_MAP[clean]) return IATA_MAP[clean];
 
-  // 1. So khớp chính xác
-  if (IATA_MAP[clean]) {
-    return IATA_MAP[clean];
-  }
-
-  // 2. So khớp từ khóa ưu tiên chuỗi dài trước
   for (const key of SORTED_IATA_KEYS) {
     const cleanKey = key.replace(/[-_.,]/g, " ");
     if (clean === cleanKey || clean.includes(cleanKey) || cleanKey.includes(clean)) {
       return IATA_MAP[key];
     }
   }
-
   return clean;
 }
 
 function resolveAirlineName(flightNo = "", existingAirline = "") {
-  if (existingAirline && existingAirline.trim() !== "") {
-    return existingAirline.trim();
-  }
+  if (existingAirline && existingAirline.trim() !== "") return existingAirline.trim();
   const clean = flightNo.replace(/\s+/g, "").toUpperCase();
   const prefix2 = clean.slice(0, 2);
   if (AIRLINE_DICT[prefix2]) return AIRLINE_DICT[prefix2];
@@ -349,6 +208,7 @@ export default function FlightDashboard() {
               (item.beltGate && !prev.beltGate) ||
               (item.terminal && !prev.terminal) ||
               (item.checkinRow && !prev.checkinRow) ||
+              (item.fr24ETA && !prev.fr24ETA) ||
               (item.hasTIAData && !prev.hasTIAData);
 
             flightMap.set(uniqueKey, {
@@ -359,6 +219,7 @@ export default function FlightDashboard() {
               beltGate: item.beltGate || prev.beltGate,
               terminal: item.terminal || prev.terminal,
               checkinRow: item.checkinRow || prev.checkinRow,
+              fr24ETA: item.fr24ETA || prev.fr24ETA,
               remark: item.hasTIAData ? item.remark : prev.remark || item.remark,
               airlines: prev.airlines || item.airlines,
             });
@@ -470,7 +331,7 @@ export default function FlightDashboard() {
         <div className="header-title">
           <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
           <p>
-            Lịch trình bay cập nhật liên tục • Tích hợp VIAGS & TIA FIDS
+            Lịch trình bay cập nhật liên tục • Tích hợp VIAGS, TIA FIDS & Flightradar24
             {lastSyncTime && ` • Cập nhật lần cuối: ${lastSyncTime}`}
           </p>
         </div>
@@ -592,7 +453,7 @@ export default function FlightDashboard() {
           <input
             type="text"
             className="form-control"
-            placeholder="Mã chuyến, IATA (SZX, CPH, HKT, PEK)..."
+            placeholder="Mã chuyến, IATA (HAN, SFO, BKK)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -605,16 +466,18 @@ export default function FlightDashboard() {
         </span>
       </div>
 
-      {/* Bảng chuyến bay */}
+      {/* Bảng chuyến bay: CỘT FLIGHTRADAR24 NẰM GIỮA ESTIMATED VÀ DESTINATION/FROM */}
       <div className="table-container">
         <table className="flight-table">
           <thead>
             <tr>
-              <th style={{ width: "120px" }}>Flights</th>
-              <th style={{ width: "100px" }}>Scheduled</th>
-              <th style={{ width: "100px" }}>Estimated</th>
-              <th style={{ width: "120px" }}>{filterTrip === "D" ? "Destination" : "From"}</th>
-              <th style={{ width: "150px" }}>
+              <th style={{ width: "110px" }}>Flights</th>
+              <th style={{ width: "95px" }}>Scheduled</th>
+              <th style={{ width: "95px" }}>Estimated</th>
+              {/* CỘT MỚI: FLIGHTRADAR24 */}
+              <th style={{ width: "125px", color: "#f59e0b" }}>Flightradar24</th>
+              <th style={{ width: "110px" }}>{filterTrip === "D" ? "Destination" : "From"}</th>
+              <th style={{ width: "140px" }}>
                 {filterTrip === "D" ? "Gate" : "Baggage"}
               </th>
               <th style={{ width: "150px" }}>Remarks</th>
@@ -624,7 +487,7 @@ export default function FlightDashboard() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" className="empty-state">
+                <td colSpan="8" className="empty-state">
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}>
                     <RefreshCw size={18} className="spinner" /> Đang tải dữ liệu...
                   </div>
@@ -651,12 +514,34 @@ export default function FlightDashboard() {
                       {item.et}
                     </td>
 
-                    {/* Cột 4: Mã sân bay IATA 3 chữ cái */}
+                    {/* Cột 4: Flightradar24 (Dành cho chuyến đến ARR) */}
+                    <td>
+                      {item.tripType === "A" && item.fr24ETA ? (
+                        <span
+                          style={{
+                            fontWeight: "800",
+                            color: "#d97706",
+                            backgroundColor: "#fffbeb",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                            border: "1px solid #fde68a",
+                            display: "inline-block",
+                            fontSize: "14px",
+                          }}
+                        >
+                          {item.fr24ETA}
+                        </span>
+                      ) : (
+                        <span style={{ color: "#94a3b8" }}>-</span>
+                      )}
+                    </td>
+
+                    {/* Cột 5: Destination hoặc From */}
                     <td className="airport-name" style={{ fontSize: "16px", fontWeight: "800", letterSpacing: "1px" }}>
                       {iataCode}
                     </td>
 
-                    {/* Cột 5: Gate/Baggage */}
+                    {/* Cột 6: Gate/Baggage */}
                     <td>
                       <div>
                         {item.beltGate ? (
@@ -686,14 +571,14 @@ export default function FlightDashboard() {
                       )}
                     </td>
 
-                    {/* Cột 6: Remarks */}
+                    {/* Cột 7: Remarks */}
                     <td>
                       <span className={getBadgeClass(item.remark)}>
                         {item.remark || "On schedule"}
                       </span>
                     </td>
 
-                    {/* Cột 7: Airlines */}
+                    {/* Cột 8: Airlines */}
                     <td style={{ fontWeight: "500", color: "#334155" }}>
                       {airlineName}
                     </td>
@@ -702,7 +587,7 @@ export default function FlightDashboard() {
               })
             ) : (
               <tr>
-                <td colSpan="7" className="empty-state">
+                <td colSpan="8" className="empty-state">
                   Không tìm thấy chuyến bay phù hợp với bộ lọc đã chọn.
                 </td>
               </tr>
