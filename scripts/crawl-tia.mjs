@@ -93,9 +93,10 @@ async function scrapeTIAPage(browser, target) {
   }
 
   const flightsMap = new Map();
+  const isDeparture = target.tripType === "D";
 
   async function collectRows() {
-    return await page.evaluate(() => {
+    return await page.evaluate((isDep) => {
       const rows = document.querySelectorAll("table.k-grid-table tbody tr.k-table-row");
       const list = [];
       rows.forEach((row) => {
@@ -109,9 +110,11 @@ async function scrapeTIAPage(browser, target) {
         const airportName = getCol(2);
         const flightNoRaw = getCol(3);
         const terminal = getCol(4);
-        const checkinRow = getCol(5);
-        const beltGate = getCol(6);
-        const remark = getCol(7);
+
+        // PHÂN BIỆT CỘT CHUYẾN ĐI (8 CỘT) VÀ CHUYẾN ĐẾN (7 CỘT - KHÔNG CÓ CỘT QUẦY CHECK-IN)
+        const checkinRow = isDep ? getCol(5) : "";
+        const beltGate = isDep ? getCol(6) : getCol(5);
+        const remark = isDep ? getCol(7) : getCol(6);
 
         if (flightNoRaw) {
           const mainFlight = flightNoRaw.split(",")[0].trim();
@@ -130,7 +133,7 @@ async function scrapeTIAPage(browser, target) {
         }
       });
       return list;
-    });
+    }, isDeparture);
   }
 
   const b1 = await collectRows();
@@ -264,7 +267,6 @@ async function main() {
   const allTIA = tiaResults.flat();
   console.log(`=== TỔNG THU THẬP: ${allTIA.length} chuyến bay từ TIA ===`);
 
-  // Đọc bản ghi gộp của ngày hôm nay (CHỈ 1 LƯỢT ĐỌC!)
   const todayRef = doc(dbLite, "daily_sgn", todayCalStr);
   const todaySnap = await getDoc(todayRef);
   const todayFlights = todaySnap.exists() ? todaySnap.data().flights || {} : {};
@@ -308,7 +310,7 @@ async function main() {
       et: f.etd,
       airportName: f.normalizedAirport,
       terminal: f.terminal,
-      checkinRow: f.checkinRow,
+      checkinRow: f.tripType === "D" ? f.checkinRow : "",
       beltGate: f.beltGate,
       remark: f.remark,
       fr24ETA: frETA,
@@ -327,7 +329,6 @@ async function main() {
     }
   }
 
-  // Lưu lại bản ghi gộp của ngày hôm nay (CHỈ 1 LƯỢT GHI!)
   await setDoc(
     todayRef,
     {
@@ -353,7 +354,7 @@ async function main() {
     );
   }
 
-  console.log(`=== ĐÃ GỘP LƯU CA TRỰC VÀO FLIGHT-STATUS-2 THÀNH CÔNG CHỈ VỚI 1 LƯỢT GHI! (${(Date.now() - startTime) / 1000}s) ===`);
+  console.log(`=== ĐÃ GỘP LƯU CA TRỰC VÀO FLIGHT-STATUS-2 THÀNH CÔNG! (${(Date.now() - startTime) / 1000}s) ===`);
   process.exit(0);
 }
 

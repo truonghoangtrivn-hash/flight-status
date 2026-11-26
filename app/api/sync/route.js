@@ -19,7 +19,6 @@ const firebaseConfig = {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const dbLite = getFirestore(app);
 
-// Dùng chung 1 Agent giữ kết nối (keepAlive: true) để tái sử dụng đường truyền TLS, tiết kiệm 50% thời gian kết nối
 const sharedHttpsAgent = new https.Agent({
   rejectUnauthorized: false,
   keepAlive: true,
@@ -43,11 +42,17 @@ function requestViags(url, options = {}) {
     const isHttps = urlObj.protocol === "https:";
     const lib = isHttps ? https : http;
 
+    const bodyBuffer = options.body ? Buffer.from(options.body, "utf-8") : null;
+    const headers = { ...(options.headers || {}) };
+    if (bodyBuffer) {
+      headers["Content-Length"] = bodyBuffer.length;
+    }
+
     const reqOptions = {
       method: options.method || "GET",
-      headers: options.headers || {},
+      headers,
       agent: isHttps ? sharedHttpsAgent : undefined,
-      timeout: 15000, // Nới lên 15 giây vì trang chủ VIAGS phản hồi lần đầu mất khoảng 6-8 giây
+      timeout: 15000,
     };
 
     const req = lib.request(url, reqOptions, (res) => {
@@ -73,10 +78,12 @@ function requestViags(url, options = {}) {
     req.on("error", (err) => reject(err));
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error("Timeout VIAGS (15s)"));
+      reject(new Error(`Timeout kết nối ${url}`));
     });
 
-    if (options.body) req.write(options.body);
+    if (bodyBuffer) {
+      req.write(bodyBuffer);
+    }
     req.end();
   });
 }
@@ -107,11 +114,12 @@ async function handleSync(request) {
 
     const targetDate = searchParams.get("date") || todayVn;
     const dayRef = doc(dbLite, "daily_sgn", targetDate);
+    const viagsUrl = "https://viags.vn/en-US/flight-schedules";
 
-    // 1. CHẠY SONG SONG: Vừa đọc Firebase (1 lượt Đọc) vừa tải trang chủ VIAGS cùng lúc để tiết kiệm thời gian!
+    // 1. Đọc Firebase (1 lượt Đọc) và lấy ViewState gốc từ VIAGS
     const [daySnap, initialRes] = await Promise.all([
       getDoc(dayRef),
-      requestViags("https://www.viags.vn/en-US/flight-schedules", {
+      requestViags(viagsUrl, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -122,7 +130,6 @@ async function handleSync(request) {
 
     const flightsMap = daySnap.exists() ? daySnap.data().flights || {} : {};
     const initHtml = await initialRes.text();
-    const cookie = initialRes.headers.get("set-cookie") || "";
 
     const viewState = getInputValue(initHtml, "__VIEWSTATE");
     const viewState1 = getInputValue(initHtml, "__VIEWSTATE1");
@@ -136,7 +143,7 @@ async function handleSync(request) {
       { station: "INT", trip: "A" },
     ];
 
-    // 2. BẮN ĐỒNG THỜI CẢ 4 NHÓM CHUYẾN BAY CÙNG LÚC (Promise.all) - Chỉ mất ~2.5 giây cho cả 4 nhóm!
+    // 2. Quét song song cả 4 nhóm (Đi QN, Đến QN, Đi QT, Đến QT) với ngưỡng chờ 15s đầy đủ
     const taskResults = await Promise.all(
       scanTasks.map(async (task) => {
         try {
@@ -160,15 +167,14 @@ async function handleSync(request) {
           formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
           formData.append("__ASYNCPOST", "true");
 
-          const response = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
+          const response = await requestViags(viagsUrl, {
             method: "POST",
             headers: {
               "User-Agent":
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
               "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
               "X-MicrosoftAjax": "Delta=true",
-              Cookie: cookie,
-              Referer: "https://www.viags.vn/en-US/flight-schedules",
+              Referer: viagsUrl,
             },
             body: formData.toString(),
           });
@@ -251,7 +257,7 @@ async function handleSync(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã gộp lưu ${totalUpdated} chuyến bay vào flight-status-2 chỉ với 1 lượt Ghi!`,
+      message: `Đã gộp lưu ${totalUpdated} chuyến bay (cả Đi & Đến) vào flight-status-2 chỉ với 1 lượt Ghi!`,
       date: targetDate,
       duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),
