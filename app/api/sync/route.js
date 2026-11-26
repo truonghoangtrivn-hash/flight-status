@@ -4,7 +4,7 @@ import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore/lite";
 import https from "node:https";
 import http from "node:http";
 
-export const maxDuration = 25;
+export const maxDuration = 30;
 export const dynamic = "force-dynamic";
 
 const firebaseConfig = {
@@ -18,12 +18,6 @@ const firebaseConfig = {
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const dbLite = getFirestore(app);
-
-const sharedHttpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-  keepAlive: true,
-  maxSockets: 12,
-});
 
 function normalizeAirport(name = "") {
   if (!name) return "";
@@ -43,6 +37,7 @@ function getNextDayStr(dateStr) {
   return date.toISOString().split("T")[0];
 }
 
+// Hàm gửi yêu cầu mạng an toàn - TẮT KEEPALIVE ĐỂ KHÔNG BỊ LỖI SOCKET DISCONNECTED
 function requestViags(url, options = {}) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
@@ -58,7 +53,10 @@ function requestViags(url, options = {}) {
     const reqOptions = {
       method: options.method || "GET",
       headers,
-      agent: isHttps ? sharedHttpsAgent : undefined,
+      // Tắt keepAlive để mỗi yêu cầu mở socket mới tinh, chống rớt mạng TLS
+      agent: isHttps
+        ? new https.Agent({ rejectUnauthorized: false, keepAlive: false })
+        : undefined,
       timeout: 12000,
     };
 
@@ -70,6 +68,13 @@ function requestViags(url, options = {}) {
       res.on("end", () => {
         resolve({
           status: res.statusCode,
+          headers: {
+            get: (name) => {
+              const val = res.headers[name.toLowerCase()];
+              if (Array.isArray(val)) return val.join("; ");
+              return val || "";
+            },
+          },
           text: async () => data,
         });
       });
@@ -78,7 +83,7 @@ function requestViags(url, options = {}) {
     req.on("error", (err) => reject(err));
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error(`Timeout kết nối ${url}`));
+      reject(new Error("Timeout kết nối VIAGS"));
     });
 
     if (bodyBuffer) {
@@ -114,13 +119,13 @@ async function handleSync(request) {
 
     const nextDayVn = getNextDayStr(todayVn);
 
-    // NẾU KHÔNG TRUYỀN THAM SỐ ?date: TỰ ĐỘNG CÀO CẢ HÔM NAY (26-NOV) VÀ NGÀY MAI (27-NOV) CÙNG LÚC!
+    // Mặc định tự động quét cả Hôm nay (26-Nov) và Ngày mai (27-Nov)
     const requestedDate = searchParams.get("date");
     const datesToSync = requestedDate ? [requestedDate] : [todayVn, nextDayVn];
 
     const viagsUrl = "https://viags.vn/en-US/flight-schedules";
 
-    // 1. Tải ViewState gốc từ VIAGS
+    // 1. Tải ViewState gốc từ VIAGS với socket mới
     const initialRes = await requestViags(viagsUrl, {
       headers: {
         "User-Agent":
@@ -144,7 +149,7 @@ async function handleSync(request) {
 
     let grandTotal = 0;
 
-    // 2. Quét lần lượt từng ngày (Mỗi ngày chỉ mất ~3.5 giây, tổng cộng chỉ ~7 giây cho cả 2 ngày!)
+    // 2. Nạp dữ liệu lần lượt cho từng ngày (mỗi nhóm gửi qua kết nối sạch)
     for (const targetDate of datesToSync) {
       const dayRef = doc(dbLite, "daily_sgn", targetDate);
       const daySnap = await getDoc(dayRef);
@@ -224,7 +229,6 @@ async function handleSync(request) {
             updatedAt: new Date().toISOString(),
           };
 
-          // Giữ nguyên ETD, GATE, REMARK của TIA
           if (existing && existing.hasTIAData) {
             flightRecord.et = existing.et || (item.ET || "").trim();
             flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
@@ -244,7 +248,6 @@ async function handleSync(request) {
         }
       }
 
-      // Lưu bản ghi gộp cho từng ngày (Chỉ 1 lượt Ghi mỗi ngày!)
       await setDoc(
         dayRef,
         {
