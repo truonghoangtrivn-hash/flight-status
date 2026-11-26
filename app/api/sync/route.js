@@ -22,7 +22,7 @@ const dbLite = getFirestore(app);
 const sharedHttpsAgent = new https.Agent({
   rejectUnauthorized: false,
   keepAlive: true,
-  maxSockets: 10,
+  maxSockets: 12,
 });
 
 function normalizeAirport(name = "") {
@@ -34,6 +34,40 @@ function normalizeAirport(name = "") {
     .replace(/Đ/g, "D")
     .toUpperCase()
     .trim();
+}
+
+function getNextDayStr(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().split("T")[0];
+}
+
+// Tính ngày khai thác hiện tại (Nếu giờ hiện tại < 03:00 sáng thì vẫn thuộc ca trực ngày hôm trước)
+function getCurrentOperationalDate() {
+  const now = new Date();
+  const vnFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  });
+  const parts = vnFormatter.formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "12", 10);
+
+  const calDateStr = `${year}-${month}-${day}`;
+  if (hour < 3) {
+    const [y, m, d] = calDateStr.split("-").map(Number);
+    const prev = new Date(Date.UTC(y, m - 1, d));
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    return prev.toISOString().split("T")[0];
+  }
+  return calDateStr;
 }
 
 function requestViags(url, options = {}) {
@@ -108,17 +142,18 @@ async function handleSync(request) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const todayVn = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Ho_Chi_Minh",
-    }).format(new Date());
+    // Ngày khai thác D (03:00 ngày D) và Ngày kế tiếp D+1 (00:00 -> 02:59 ngày D+1)
+    const opDate = searchParams.get("date") || getCurrentOperationalDate();
+    const nextDate = getNextDayStr(opDate);
 
-    const targetDate = searchParams.get("date") || todayVn;
-    const dayRef = doc(dbLite, "daily_sgn", targetDate);
+    const day1Ref = doc(dbLite, "daily_sgn", opDate);
+    const day2Ref = doc(dbLite, "daily_sgn", nextDate);
     const viagsUrl = "https://viags.vn/en-US/flight-schedules";
 
-    // 1. Đọc Firebase (1 lượt Đọc) và lấy ViewState gốc từ VIAGS
-    const [daySnap, initialRes] = await Promise.all([
-      getDoc(dayRef),
+    // 1. Đọc 2 bản ghi ngày D & D+1 và tải ViewState gốc từ VIAGS cùng lúc
+    const [day1Snap, day2Snap, initialRes] = await Promise.all([
+      getDoc(day1Ref),
+      getDoc(day2Ref),
       requestViags(viagsUrl, {
         headers: {
           "User-Agent":
@@ -128,24 +163,31 @@ async function handleSync(request) {
       }),
     ]);
 
-    const flightsMap = daySnap.exists() ? daySnap.data().flights || {} : {};
-    const initHtml = await initialRes.text();
+    const flightsMapDay1 = day1Snap.exists() ? day1Snap.data().flights || {} : {};
+    const flightsMapDay2 = day2Snap.exists() ? day2Snap.data().flights || {} : {};
 
+    const initHtml = await initialRes.text();
     const viewState = getInputValue(initHtml, "__VIEWSTATE");
     const viewState1 = getInputValue(initHtml, "__VIEWSTATE1");
     const viewStateGenerator = getInputValue(initHtml, "__VIEWSTATEGENERATOR") || "CA0B0334";
     const eventValidation = getInputValue(initHtml, "__EVENTVALIDATION");
 
-    const scanTasks = [
-      { station: "DOM", trip: "D" },
-      { station: "DOM", trip: "A" },
-      { station: "INT", trip: "D" },
-      { station: "INT", trip: "A" },
+    // Danh sách quét:
+    // - Ngày D (opDate): Quét cả ngày (0000-2359) để lấy toàn bộ chuyến từ 03:00 đến 23:59
+    // - Ngày D+1 (nextDate): Chỉ cần quét khung giờ rạng sáng "0000-0359" (00:00 - 04:00) siêu nhẹ để lấy các chuyến 00:00 -> 02:59+!
+    const scanJobs = [
+      { scanDate: opDate, timeRange: "0000-2359", station: "DOM", trip: "D" },
+      { scanDate: opDate, timeRange: "0000-2359", station: "DOM", trip: "A" },
+      { scanDate: opDate, timeRange: "0000-2359", station: "INT", trip: "D" },
+      { scanDate: opDate, timeRange: "0000-2359", station: "INT", trip: "A" },
+      { scanDate: nextDate, timeRange: "0000-0359", station: "DOM", trip: "D" },
+      { scanDate: nextDate, timeRange: "0000-0359", station: "DOM", trip: "A" },
+      { scanDate: nextDate, timeRange: "0000-0359", station: "INT", trip: "D" },
+      { scanDate: nextDate, timeRange: "0000-0359", station: "INT", trip: "A" },
     ];
 
-    // 2. Quét song song cả 4 nhóm (Đi QN, Đến QN, Đi QT, Đến QT) với ngưỡng chờ 15s đầy đủ
-    const taskResults = await Promise.all(
-      scanTasks.map(async (task) => {
+    const jobResults = await Promise.all(
+      scanJobs.map(async (job) => {
         try {
           const formData = new URLSearchParams();
           formData.append(
@@ -160,11 +202,11 @@ async function handleSync(request) {
           if (viewState1) formData.append("__VIEWSTATE1", viewState1);
           formData.append("__VIEWSTATEGENERATOR", viewStateGenerator);
           formData.append("__EVENTVALIDATION", eventValidation);
-          formData.append("ctl00$mainContent$ctl00$ddlStation", task.station);
-          formData.append("ctl00$mainContent$ctl00$ddlTrip", task.trip);
+          formData.append("ctl00$mainContent$ctl00$ddlStation", job.station);
+          formData.append("ctl00$mainContent$ctl00$ddlTrip", job.trip);
           formData.append("ctl00$mainContent$ctl00$ddlOriginal", "SGN");
-          formData.append("ctl00$mainContent$ctl00$datetimepicker1", targetDate);
-          formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
+          formData.append("ctl00$mainContent$ctl00$datetimepicker1", job.scanDate);
+          formData.append("ctl00$mainContent$ctl00$ddlScheduled", job.timeRange);
           formData.append("__ASYNCPOST", "true");
 
           const response = await requestViags(viagsUrl, {
@@ -182,35 +224,45 @@ async function handleSync(request) {
           const text = await response.text();
           const jsonMatch = text.match(/beginLoadData\((\[[\s\S]*?\]),\s*\d+\)/);
           if (jsonMatch && jsonMatch[1]) {
-            return { task, parsed: JSON.parse(jsonMatch[1]) };
+            return { job, parsed: JSON.parse(jsonMatch[1]) };
           }
-          return { task, parsed: [] };
+          return { job, parsed: [] };
         } catch (err) {
-          console.error("Bỏ qua lỗi nhóm:", task.station, task.trip, err.message);
-          return { task, parsed: [] };
+          console.error("Bỏ qua lỗi nhóm:", job.scanDate, job.station, job.trip, err.message);
+          return { job, parsed: [] };
         }
       })
     );
 
-    let totalUpdated = 0;
+    let totalUpdatedDay1 = 0;
+    let totalUpdatedDay2 = 0;
 
-    for (const { task, parsed } of taskResults) {
+    for (const { job, parsed } of jobResults) {
+      const activeMap = job.scanDate === opDate ? flightsMapDay1 : flightsMapDay2;
+
       for (let idx = 0; idx < parsed.length; idx++) {
         const item = parsed[idx];
+        const st = (item.ST || "").trim();
+
+        // Đối với ngày D+1, chỉ lấy các chuyến có STD/STA từ 00:00 đến 02:59 (trước 03:00)
+        if (job.scanDate === nextDate && st >= "03:00") {
+          continue;
+        }
+
         const rawFlt = (item.FltNo || "").trim();
         const cleanFlt = rawFlt.replace(/\s+/g, "").toUpperCase();
-        const timeKey = (item.ST || "").replace(/[^0-9]/g, "");
+        const timeKey = st.replace(/[^0-9]/g, "");
 
-        const flightKey = `${task.trip}_${cleanFlt}_${timeKey}`;
-        const existing = flightsMap[flightKey];
+        const flightKey = `${job.trip}_${cleanFlt}_${timeKey}`;
+        const existing = activeMap[flightKey];
 
         const flightRecord = {
-          id: `${targetDate}_${flightKey}`,
+          id: `${job.scanDate}_${flightKey}`,
           sortOrder: idx,
-          date: targetDate,
-          stationType: task.station,
-          tripType: task.trip,
-          st: (item.ST || "").trim(),
+          date: job.scanDate,
+          stationType: job.station,
+          tripType: job.trip,
+          st,
           et: (item.ET || "").trim(),
           airportName: normalizeAirport((item.AirportName || "").trim()),
           airlines: (item.Airlines || "").trim(),
@@ -224,7 +276,7 @@ async function handleSync(request) {
             flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
             flightRecord.remark = existing.remark || (item.Remark || "").trim();
             flightRecord.terminal = existing.terminal || "";
-            flightRecord.checkinRow = existing.checkinRow || "";
+            flightRecord.checkinRow = job.trip === "D" ? existing.checkinRow || "" : "";
             flightRecord.hasTIAData = true;
           } else {
             flightRecord.beltGate = (item.BeltGate || "").trim();
@@ -238,27 +290,41 @@ async function handleSync(request) {
           flightRecord.remark = (item.Remark || "").trim();
         }
 
-        flightsMap[flightKey] = flightRecord;
-        totalUpdated++;
+        activeMap[flightKey] = flightRecord;
+        if (job.scanDate === opDate) totalUpdatedDay1++;
+        else totalUpdatedDay2++;
       }
     }
 
-    // 3. CHỈ TỐN 1 LƯỢT GHI DUY NHẤT: Lưu toàn bộ vào flight-status-2
-    await setDoc(
-      dayRef,
-      {
-        date: targetDate,
-        lastUpdated: new Date().toISOString(),
-        totalFlights: Object.keys(flightsMap).length,
-        flights: flightsMap,
-      },
-      { merge: true }
-    );
+    // Lưu gộp vào Firebase (1 lượt Ghi cho ngày D và 1 lượt Ghi cho rạng sáng ngày D+1)
+    await Promise.all([
+      setDoc(
+        day1Ref,
+        {
+          date: opDate,
+          lastUpdated: new Date().toISOString(),
+          totalFlights: Object.keys(flightsMapDay1).length,
+          flights: flightsMapDay1,
+        },
+        { merge: true }
+      ),
+      setDoc(
+        day2Ref,
+        {
+          date: nextDate,
+          lastUpdated: new Date().toISOString(),
+          totalFlights: Object.keys(flightsMapDay2).length,
+          flights: flightsMapDay2,
+        },
+        { merge: true }
+      ),
+    ]);
 
     return NextResponse.json({
       success: true,
-      message: `Đã gộp lưu ${totalUpdated} chuyến bay (cả Đi & Đến) vào flight-status-2 chỉ với 1 lượt Ghi!`,
-      date: targetDate,
+      message: `Đã gộp lưu ca trực ${opDate} (${totalUpdatedDay1} chuyến ngày ${opDate} + ${totalUpdatedDay2} chuyến rạng sáng ${nextDate})!`,
+      opDate,
+      nextDate,
       duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),
     });

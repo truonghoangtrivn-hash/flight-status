@@ -39,6 +39,40 @@ function getVnDateFromTimestamp(timestampSec) {
   }).format(d);
 }
 
+function getNextDayStr(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().split("T")[0];
+}
+
+// Tính ngày khai thác hiện tại (03:00 ngày D -> 02:59 ngày D+1)
+function getCurrentOperationalDate() {
+  const now = new Date();
+  const vnFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  });
+  const parts = vnFormatter.formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "12", 10);
+
+  const calDateStr = `${year}-${month}-${day}`;
+  if (hour < 3) {
+    const [y, m, d] = calDateStr.split("-").map(Number);
+    const prev = new Date(Date.UTC(y, m - 1, d));
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    return prev.toISOString().split("T")[0];
+  }
+  return calDateStr;
+}
+
 export async function GET(request) {
   return await handleSyncFR24(request);
 }
@@ -50,9 +84,11 @@ export async function POST(request) {
 async function handleSyncFR24(request) {
   const startTime = Date.now();
   try {
-    const todayVn = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Ho_Chi_Minh",
-    }).format(new Date());
+    const { searchParams } = new URL(request.url);
+
+    // Xác định Ngày khai thác D (03:00 -> 23:59) và Ngày kế tiếp D+1 (00:00 -> 02:59)
+    const opDate = searchParams.get("date") || getCurrentOperationalDate();
+    const nextDate = getNextDayStr(opDate);
 
     // 1. Gọi API Flightradar24
     const controller = new AbortController();
@@ -82,6 +118,7 @@ async function handleSyncFR24(request) {
     const arrivals =
       json?.result?.response?.airport?.pluginData?.schedule?.arrivals?.data || [];
 
+    // Lưu map theo khóa chuẩn: NgàyLịchSTA_MãChuyếnBay
     const fr24ExactMap = new Map();
 
     arrivals.forEach((item) => {
@@ -97,62 +134,126 @@ async function handleSyncFR24(request) {
       }
 
       const scheduledSec = flt.time?.scheduled?.arrival || etaSec;
-      const flightArrivalDate = getVnDateFromTimestamp(scheduledSec || etaSec);
+      const staDate = getVnDateFromTimestamp(scheduledSec);
+      const staTime = formatVnTime(scheduledSec);
       const etaFormatted = formatVnTime(etaSec);
 
-      if (flightNo && flightArrivalDate && etaFormatted) {
-        const exactKey = `${flightArrivalDate}_${flightNo}`;
+      if (flightNo && staDate && etaFormatted) {
+        const exactKey = `${staDate}_${flightNo}`;
         fr24ExactMap.set(exactKey, {
           eta: etaFormatted,
           status: flt.status?.text || "",
-          date: flightArrivalDate,
+          staDate,
+          staTime,
         });
       }
     });
 
-    // 2. CHỈ TỐN 1 LƯỢT ĐỌC DUY NHẤT: Đọc bản ghi gộp của ngày hôm nay
-    const dayRef = doc(dbLite, "daily_sgn", todayVn);
-    const daySnap = await getDoc(dayRef);
+    // 2. Đọc cả 2 bản ghi của Ca trực: Ngày D (opDate) và Ngày D+1 (nextDate)
+    const day1Ref = doc(dbLite, "daily_sgn", opDate);
+    const day2Ref = doc(dbLite, "daily_sgn", nextDate);
 
-    let updatedCount = 0;
+    const [day1Snap, day2Snap] = await Promise.all([getDoc(day1Ref), getDoc(day2Ref)]);
 
-    if (daySnap.exists()) {
-      const dayData = daySnap.data();
-      const flightsMap = dayData.flights || {};
+    let updatedDay1 = 0;
+    let updatedDay2 = 0;
+    const writePromises = [];
 
-      for (const [key, flt] of Object.entries(flightsMap)) {
+    // Cập nhật phần 1 của ca trực: Các chuyến đến trong ngày D có STA từ 03:00 đến 23:59
+    if (day1Snap.exists()) {
+      const day1Data = day1Snap.data();
+      const flightsMap1 = day1Data.flights || {};
+
+      for (const [key, flt] of Object.entries(flightsMap1)) {
         if (flt.tripType === "A") {
-          const cleanFlt = (flt.flightNo || "").replace(/\s+/g, "").toUpperCase();
-          const exactKey = `${todayVn}_${cleanFlt}`;
+          // Tự động sửa lại nếu còn bản ghi cũ bị lệch cột Băng chuyền & Quầy (như VU8601)
+          if (flt.checkinRow && isNaN(Number(flt.beltGate))) {
+            flt.remark = flt.beltGate || flt.remark;
+            flt.beltGate = flt.checkinRow;
+            flt.checkinRow = "";
+          }
 
-          if (fr24ExactMap.has(exactKey)) {
-            const info = fr24ExactMap.get(exactKey);
-            flightsMap[key] = {
-              ...flt,
-              fr24ETA: info.eta,
-              fr24Status: info.status,
-            };
-            updatedCount++;
+          if ((flt.st || "") >= "03:00") {
+            const cleanFlt = (flt.flightNo || "").replace(/\s+/g, "").toUpperCase();
+            const exactKey = `${opDate}_${cleanFlt}`;
+
+            if (fr24ExactMap.has(exactKey)) {
+              const info = fr24ExactMap.get(exactKey);
+              flightsMap1[key] = {
+                ...flt,
+                fr24ETA: info.eta,
+                fr24Status: info.status,
+              };
+              updatedDay1++;
+            }
           }
         }
       }
 
-      // 3. CHỈ TỐN 1 LƯỢT GHI DUY NHẤT: Cập nhật lại bản ghi của ngày hôm nay
-      await setDoc(
-        dayRef,
-        {
-          lastFR24Sync: new Date().toISOString(),
-          flights: flightsMap,
-        },
-        { merge: true }
+      writePromises.push(
+        setDoc(
+          day1Ref,
+          {
+            lastFR24Sync: new Date().toISOString(),
+            flights: flightsMap1,
+          },
+          { merge: true }
+        )
       );
     }
 
+    // Cập nhật phần 2 của ca trực: Các chuyến đến rạng sáng ngày D+1 có STA từ 00:00 đến 02:59
+    if (day2Snap.exists()) {
+      const day2Data = day2Snap.data();
+      const flightsMap2 = day2Data.flights || {};
+
+      for (const [key, flt] of Object.entries(flightsMap2)) {
+        if (flt.tripType === "A") {
+          if (flt.checkinRow && isNaN(Number(flt.beltGate))) {
+            flt.remark = flt.beltGate || flt.remark;
+            flt.beltGate = flt.checkinRow;
+            flt.checkinRow = "";
+          }
+
+          if ((flt.st || "") < "03:00") {
+            const cleanFlt = (flt.flightNo || "").replace(/\s+/g, "").toUpperCase();
+            const exactKey = `${nextDate}_${cleanFlt}`;
+
+            if (fr24ExactMap.has(exactKey)) {
+              const info = fr24ExactMap.get(exactKey);
+              flightsMap2[key] = {
+                ...flt,
+                fr24ETA: info.eta,
+                fr24Status: info.status,
+              };
+              updatedDay2++;
+            }
+          }
+        }
+      }
+
+      writePromises.push(
+        setDoc(
+          day2Ref,
+          {
+            lastFR24Sync: new Date().toISOString(),
+            flights: flightsMap2,
+          },
+          { merge: true }
+        )
+      );
+    }
+
+    await Promise.all(writePromises);
+
     return NextResponse.json({
       success: true,
-      message: `Đã cập nhật FR24 cho ${updatedCount} chuyến bay vào flight-status-2 chỉ với 1 lượt Ghi!`,
+      message: `Đã cập nhật FR24 theo quy luật 03:00->02:59+ (${updatedDay1} chuyến ngày ${opDate} + ${updatedDay2} chuyến rạng sáng ${nextDate})!`,
+      opDate,
+      nextDate,
       totalFR24: fr24ExactMap.size,
-      updatedInFirestore: updatedCount,
+      updatedDay1,
+      updatedDay2,
       duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),
     });
