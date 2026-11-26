@@ -2,9 +2,18 @@ name: Auto Sync TIA Airport Flights
 
 on:
   schedule:
-    # Quét định kỳ mỗi 30 phút một lần (Bảo đảm chạy êm ru 24/7 quanh năm không hết quota)
-    - cron: '*/30 * * * *'
-  # Vẫn cho phép bạn bấm nút chạy thủ công bất cứ khi nào cần
+    # 1. Khung giờ cao điểm Tân Sơn Nhất (07:00 - 19:00 VN = 00:00 - 12:00 UTC): Chạy 15 phút / lần
+    - cron: '*/15 0-11 * * *'
+
+    # 2. Khung giờ tối muộn (19:00 - 01:00 VN = 12:00 - 18:00 UTC): Chạy 30 phút / lần
+    - cron: '0,30 12-17 * * *'
+
+    # 3. Khung giờ sáng sớm (05:00 - 07:00 VN = 22:00 - 24:00 UTC ngày trước): Chạy 30 phút / lần
+    - cron: '0,30 22-23 * * *'
+
+    # (Khung giờ 01:00 - 05:00 sáng VN hoàn toàn không có lịch -> TỰ ĐỘNG TẮT NGHỈ)
+
+  # Cho phép bạn bấm nút chạy thủ công bất cứ lúc nào cần
   workflow_dispatch:
 
 jobs:

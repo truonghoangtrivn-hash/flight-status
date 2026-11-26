@@ -81,7 +81,8 @@ async function scrapeTIAPage(browser, target) {
 
   console.log(`[TIA Song Song] Đang tải: ${target.name}...`);
   try {
-    await page.goto(target.url, { waitUntil: "networkidle2", timeout: 35000 });
+    // Dùng domcontentloaded siêu nhanh, không bị treo chờ WebSocket
+    await page.goto(target.url, { waitUntil: "domcontentloaded", timeout: 25000 });
   } catch (e) {}
 
   try {
@@ -110,25 +111,29 @@ async function scrapeTIAPage(browser, target) {
         const airportName = getCol(2);
         const flightNoRaw = getCol(3);
         const terminal = getCol(4);
-
-        // PHÂN BIỆT CỘT CHUYẾN ĐI (8 CỘT) VÀ CHUYẾN ĐẾN (7 CỘT - KHÔNG CÓ CỘT QUẦY CHECK-IN)
         const checkinRow = isDep ? getCol(5) : "";
         const beltGate = isDep ? getCol(6) : getCol(5);
         const remark = isDep ? getCol(7) : getCol(6);
 
         if (flightNoRaw) {
-          const mainFlight = flightNoRaw.split(",")[0].trim();
-          const cleanFlt = mainFlight.replace(/\s+/g, "").toUpperCase();
-          list.push({
-            std,
-            etd: etd || std,
-            airportName,
-            cleanFlightNo: cleanFlt,
-            displayFlightNo: flightNoRaw,
-            terminal,
-            checkinRow,
-            beltGate,
-            remark,
+          // BÓC TÁCH TOÀN BỘ CÁC MÃ LIÊN DANH (Ví dụ "AF 3318, VN 1394" -> lấy cả 2 mã)
+          const allCodes = flightNoRaw
+            .split(/[,/]/)
+            .map((c) => c.trim().replace(/\s+/g, "").toUpperCase())
+            .filter(Boolean);
+
+          allCodes.forEach((cleanFlt) => {
+            list.push({
+              std,
+              etd: etd || std,
+              airportName,
+              cleanFlightNo: cleanFlt,
+              displayFlightNo: flightNoRaw,
+              terminal,
+              checkinRow,
+              beltGate,
+              remark,
+            });
           });
         }
       });
@@ -139,7 +144,8 @@ async function scrapeTIAPage(browser, target) {
   const b1 = await collectRows();
   b1.forEach((f) => flightsMap.set(f.cleanFlightNo, f));
 
-  await new Promise((r) => setTimeout(r, 12000));
+  // Chờ 10s để bảng TIA tự lật sang trang tiếp theo
+  await new Promise((r) => setTimeout(r, 10000));
 
   const b2 = await collectRows();
   b2.forEach((f) => flightsMap.set(f.cleanFlightNo, f));
@@ -265,7 +271,7 @@ async function main() {
   await browser.close();
 
   const allTIA = tiaResults.flat();
-  console.log(`=== TỔNG THU THẬP: ${allTIA.length} chuyến bay từ TIA ===`);
+  console.log(`=== TỔNG THU THẬP: ${allTIA.length} lượt chuyến bay từ TIA (gồm cả liên danh) ===`);
 
   const todayRef = doc(dbLite, "daily_sgn", todayCalStr);
   const todaySnap = await getDoc(todayRef);
@@ -305,14 +311,14 @@ async function main() {
       stationType: f.stationType,
       tripType: f.tripType,
       flightNo: f.cleanFlightNo,
-      displayFlightNo: f.displayFlightNo,
+      displayFlightNo: existing.displayFlightNo || f.displayFlightNo,
       st: f.std,
-      et: f.etd,
-      airportName: f.normalizedAirport,
+      et: f.etd,                      // ƯU TIÊN ETD CỦA TIA
+      airportName: existing.airportName || f.normalizedAirport,
       terminal: f.terminal,
       checkinRow: f.tripType === "D" ? f.checkinRow : "",
-      beltGate: f.beltGate,
-      remark: f.remark,
+      beltGate: f.beltGate,           // ƯU TIÊN GATE/BAGGAGE CỦA TIA
+      remark: f.remark,               // ƯU TIÊN REMARK THỜI GIAN THỰC CỦA TIA CHO MỌI CHUYẾN LIÊN DANH
       fr24ETA: frETA,
       hasTIAData: true,
       updatedAt: new Date().toISOString(),
@@ -354,7 +360,7 @@ async function main() {
     );
   }
 
-  console.log(`=== ĐÃ GỘP LƯU CA TRỰC VÀO FLIGHT-STATUS-2 THÀNH CÔNG! (${(Date.now() - startTime) / 1000}s) ===`);
+  console.log(`=== ĐÃ CẬP NHẬT TIA CHO TOÀN BỘ CHUYẾN BAY (THỜI GIAN: ${(Date.now() - startTime) / 1000}s) ===`);
   process.exit(0);
 }
 
