@@ -1,11 +1,31 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, doc, writeBatch } from "firebase/firestore";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import {
+  getFirestore,
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  writeBatch,
+} from "firebase/firestore/lite";
 import https from "node:https";
 import http from "node:http";
 
-export const maxDuration = 15;
+export const maxDuration = 20;
 export const dynamic = "force-dynamic";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD5xJ95pYWckUcnbGzrD6mPUcYEFrwuUj8",
+  authDomain: "flight-status-b0895.firebaseapp.com",
+  projectId: "flight-status-b0895",
+  storageBucket: "flight-status-b0895.firebasestorage.app",
+  messagingSenderId: "274057468561",
+  appId: "1:274057468561:web:f8edcb85d692caebb9bd30",
+};
+
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const dbLite = getFirestore(app);
 
 function normalizeAirport(name = "") {
   if (!name) return "";
@@ -30,7 +50,7 @@ function requestViags(url, options = {}) {
       agent: isHttps
         ? new https.Agent({ rejectUnauthorized: false, keepAlive: false })
         : undefined,
-      timeout: 6000, // Tối đa 6 giây ngắt kết nối an toàn
+      timeout: 5000,
     };
 
     const req = lib.request(url, reqOptions, (res) => {
@@ -83,9 +103,9 @@ async function handleSync(request) {
 
     const targetDate = searchParams.get("date") || todayVn;
 
-    // 1. Tải trước các chuyến bay hiện có từ Firestore
+    // 1. Tải nhanh các chuyến bay hiện có bằng Firestore Lite (Stateless HTTP)
     const existingSnap = await getDocs(
-      query(collection(db, "flights_sgn"), where("date", "==", targetDate))
+      query(collection(dbLite, "flights_sgn"), where("date", "==", targetDate))
     );
     const existingMap = new Map();
     existingSnap.forEach((d) => existingMap.set(d.id, d.data()));
@@ -114,7 +134,7 @@ async function handleSync(request) {
 
     let allFlights = [];
 
-    // 3. Quét 4 nhóm chính của ngày (chạy gọn gàng chỉ mất khoảng 2-3 giây)
+    // 3. Quét 4 nhóm chính
     for (const task of scanTasks) {
       try {
         const formData = new URLSearchParams();
@@ -179,7 +199,6 @@ async function handleSync(request) {
               updatedAt: new Date().toISOString(),
             };
 
-            // Ưu tiên dữ liệu TIA nếu đã có quầy/cửa
             if (existing && existing.hasTIAData) {
               flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
               flightRecord.remark = existing.remark || (item.Remark || "").trim();
@@ -200,15 +219,15 @@ async function handleSync(request) {
       }
     }
 
-    // 4. Lưu đồng bộ hàng loạt vào Firestore
+    // 4. Lưu vào Firestore bằng Lite SDK (Tức thời, không giữ socket)
     let totalUpdated = 0;
     const chunkSize = 400;
     for (let i = 0; i < allFlights.length; i += chunkSize) {
       const chunk = allFlights.slice(i, i + chunkSize);
-      const batch = writeBatch(db);
+      const batch = writeBatch(dbLite);
 
       for (const flight of chunk) {
-        const flightRef = doc(db, "flights_sgn", flight.id);
+        const flightRef = doc(dbLite, "flights_sgn", flight.id);
         batch.set(flightRef, flight, { merge: true });
       }
 
@@ -216,8 +235,8 @@ async function handleSync(request) {
       totalUpdated += chunk.length;
     }
 
-    const metaBatch = writeBatch(db);
-    const metaRef = doc(db, "meta", "sync_status");
+    const metaBatch = writeBatch(dbLite);
+    const metaRef = doc(dbLite, "meta", "sync_status");
     metaBatch.set(
       metaRef,
       {
