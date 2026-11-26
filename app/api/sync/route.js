@@ -8,12 +8,12 @@ export const maxDuration = 20;
 export const dynamic = "force-dynamic";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD5xJ95pYWckUcnbGzrD6mPUcYEFrwuUj8",
-  authDomain: "flight-status-b0895.firebaseapp.com",
-  projectId: "flight-status-b0895",
-  storageBucket: "flight-status-b0895.firebasestorage.app",
-  messagingSenderId: "274057468561",
-  appId: "1:274057468561:web:f8edcb85d692caebb9bd30",
+  apiKey: "AIzaSyD3hUDc9DjuIfDLL70z_uN4x7N3_Rkeczo",
+  authDomain: "flight-status-2.firebaseapp.com",
+  projectId: "flight-status-2",
+  storageBucket: "flight-status-2.firebasestorage.app",
+  messagingSenderId: "359685908297",
+  appId: "1:359685908297:web:4bd32434e10323ee6bdc98",
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -187,7 +187,6 @@ async function handleSync(request) {
               updatedAt: new Date().toISOString(),
             };
 
-            // Bảo vệ dữ liệu TIA và FR24 nếu đã có sẵn
             if (existing) {
               if (existing.hasTIAData) {
                 flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
@@ -230,7 +229,7 @@ async function handleSync(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã gộp lưu ${totalUpdated} chuyến bay chỉ với 1 lượt Ghi!`,
+      message: `Đã gộp lưu ${totalUpdated} chuyến bay vào flight-status-2 chỉ với 1 lượt Ghi!`,
       date: targetDate,
       duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),

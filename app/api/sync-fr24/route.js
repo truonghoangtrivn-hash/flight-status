@@ -6,12 +6,12 @@ export const maxDuration = 20;
 export const dynamic = "force-dynamic";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD5xJ95pYWckUcnbGzrD6mPUcYEFrwuUj8",
-  authDomain: "flight-status-b0895.firebaseapp.com",
-  projectId: "flight-status-b0895",
-  storageBucket: "flight-status-b0895.firebasestorage.app",
-  messagingSenderId: "274057468561",
-  appId: "1:274057468561:web:f8edcb85d692caebb9bd30",
+  apiKey: "AIzaSyD3hUDc9DjuIfDLL70z_uN4x7N3_Rkeczo",
+  authDomain: "flight-status-2.firebaseapp.com",
+  projectId: "flight-status-2",
+  storageBucket: "flight-status-2.firebasestorage.app",
+  messagingSenderId: "359685908297",
+  appId: "1:359685908297:web:4bd32434e10323ee6bdc98",
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -150,7 +150,7 @@ async function handleSyncFR24(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã cập nhật FR24 cho ${updatedCount} chuyến bay chỉ với 1 lượt Ghi!`,
+      message: `Đã cập nhật FR24 cho ${updatedCount} chuyến bay vào flight-status-2 chỉ với 1 lượt Ghi!`,
       totalFR24: fr24ExactMap.size,
       updatedInFirestore: updatedCount,
       duration: `${(Date.now() - startTime) / 1000}s`,

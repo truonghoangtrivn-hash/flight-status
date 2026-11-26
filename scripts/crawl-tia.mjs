@@ -3,12 +3,12 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore/lite";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD5xJ95pYWckUcnbGzrD6mPUcYEFrwuUj8",
-  authDomain: "flight-status-b0895.firebaseapp.com",
-  projectId: "flight-status-b0895",
-  storageBucket: "flight-status-b0895.firebasestorage.app",
-  messagingSenderId: "274057468561",
-  appId: "1:274057468561:web:f8edcb85d692caebb9bd30",
+  apiKey: "AIzaSyD3hUDc9DjuIfDLL70z_uN4x7N3_Rkeczo",
+  authDomain: "flight-status-2.firebaseapp.com",
+  projectId: "flight-status-2",
+  storageBucket: "flight-status-2.firebasestorage.app",
+  messagingSenderId: "359685908297",
+  appId: "1:359685908297:web:4bd32434e10323ee6bdc98",
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -281,7 +281,6 @@ async function main() {
     }
 
     const flightKey = `${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
-    const targetMap = assignedDate === todayCalStr ? todayFlights : (nextFlights || {});
 
     if (assignedDate === nextDayCalStr && !nextFlights) {
       nextRef = doc(dbLite, "daily_sgn", nextDayCalStr);
@@ -318,7 +317,6 @@ async function main() {
     };
   }
 
-  // Cập nhật FR24 ETA cho các chuyến đến trong ngày hôm nay
   for (const [key, flt] of Object.entries(todayFlights)) {
     if (flt.tripType === "A") {
       const cleanFlt = (flt.flightNo || "").replace(/\s+/g, "").toUpperCase();
@@ -355,7 +353,7 @@ async function main() {
     );
   }
 
-  console.log(`=== ĐÃ GỘP LƯU CA TRỰC THÀNH CÔNG CHỈ VỚI 1 LƯỢT GHI! (${(Date.now() - startTime) / 1000}s) ===`);
+  console.log(`=== ĐÃ GỘP LƯU CA TRỰC VÀO FLIGHT-STATUS-2 THÀNH CÔNG CHỈ VỚI 1 LƯỢT GHI! (${(Date.now() - startTime) / 1000}s) ===`);
   process.exit(0);
 }
 
