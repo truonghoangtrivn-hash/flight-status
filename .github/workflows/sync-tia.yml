@@ -2,8 +2,7 @@ name: Auto Sync TIA Airport Flights
 
 on:
   schedule:
-    # CHẠY TỐI ĐA TOÀN BỘ 24/7 CẢ NGÀY LẪN ĐÊM: MỖI 5 PHÚT MỘT LẦN SUỐT 365 NGÀY
-    # (Vì kho mã là PUBLIC nên GitHub cho phép chạy không giới hạn số phút, miễn phí 100%)
+    # CHẠY TỐI ĐA 24/7 CẢ NGÀY LẪN ĐÊM: MỖI 5 PHÚT MỘT LẦN SUỐT 365 NGÀY
     - cron: '*/5 * * * *'
 
   workflow_dispatch:

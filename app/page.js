@@ -104,7 +104,7 @@ const AIRLINE_DICT = {
   VI: "VOLGA-DNEPR AIRLINES",
 };
 
-// Chuyến bay đi Tokyo Haneda (HND)
+// Chuyến bay đi Tokyo Haneda (HND). Các chuyến khác mặc định đi Narita (NRT)
 const TOKYO_HANEDA_FLIGHTS = new Set([
   "NH891",
   "NH892",
@@ -149,16 +149,16 @@ const IATA_MAP = {
   HANGZHOU: "HGH", WUHAN: "WUH", XIAMEN: "XMN", JINAN: "TNA",
   SANYA: "SYX", HAIKOU: "HAK", NANNING: "NNG", ZHENGZHOU: "CGO", CHANGSHA: "CSX",
   HONGKONG: "HKG", "HONG KONG": "HKG", MACAU: "MFM", MACAO: "MFM",
-  TAIPEI: "TPE", TAOYUAN: "TPE", KAOHSIUNG: "KHH", TAICHUNG: "RMQ",
+  TAIPEI: "TPE", TAOYUAN: "TPE", KAOHSIUNG: "KHH", TAICHUNG: "RMQ", TAINAN: "TNN",
   "SIEM RIEP": "SAI", "SIEM REAP": "SAI", SIEMREAP: "SAI", SIEMRIEP: "SAI",
   "PHNOM PENH": "PNH", PHNOMPENH: "PNH", SIHANOUKVILLE: "KOS",
   BANGKOK: "BKK", SUVARNABHUMI: "BKK", "DON MUEANG": "DMK", "DON MUANG": "DMK",
   PHUKET: "HKT", "CHIANG MAI": "CNX",
   SINGAPORE: "SIN", CHANGI: "SIN", "KUALA LUMPUR": "KUL", KUALALUMPUR: "KUL",
-  PENANG: "PEN", KUCHING: "KCH",
+  PENANG: "PEN", KUCHING: "KCH", "KOTA KINABALU": "BKI",
   JAKARTA: "CGK", SEMARANG: "SRG", BALI: "DPS", DENPASAR: "DPS", SURABAYA: "SUB",
   MANILA: "MNL", CEBU: "CEB", CLARK: "CRK",
-  VIENTIANE: "VTE", "LUANG PRABANG": "LPQ", YANGON: "RGN", BRUNEI: "BWN",
+  VIENTIANE: "VTE", "LUANG PRABANG": "LPQ", YANGON: "RGN", MANDALAY: "MDL", BRUNEI: "BWN",
   HANEDA: "HND", "HANEDA-TOKYO, JAPAN": "HND", "HANEDA-TOKYO": "HND",
   NARITA: "NRT", "NARITA-TOKYO": "NRT",
   OSAKA: "KIX", KANSAI: "KIX", NAGOYA: "NGO", FUKUOKA: "FUK", SAPPORO: "CTS", OKINAWA: "OKA",
@@ -168,8 +168,8 @@ const IATA_MAP = {
   ASHKHABAD: "ASB", ASHGABAT: "ASB", MOSCOW: "SVO", BARNAUL: "BAX", NOVOSIBIRSK: "OVB",
   ALMATY: "ALA", TASHKENT: "TAS", ISTANBUL: "IST", DOHA: "DOH", DUBAI: "DXB", "ABU DHABI": "AUH",
   BOMBAY: "BOM", MUMBAI: "BOM", "MUMBAI, INDIA": "BOM", DELHI: "DEL", "NEW DELHI": "DEL",
-  BENGALURU: "BLR", CHENNAI: "MAA", KOLKATA: "CCU", COLOMBO: "CMB",
-  SYDNEY: "SYD", MELBOURNE: "MEL", BRISBANE: "BNE", PERTH: "PER", AUCKLAND: "AKL",
+  BENGALURU: "BLR", BANGALORE: "BLR", CHENNAI: "MAA", KOLKATA: "CCU", COLOMBO: "CMB",
+  SYDNEY: "SYD", MELBOURNE: "MEL", BRISBANE: "BNE", PERTH: "PER", ADELAIDE: "ADL", AUCKLAND: "AKL",
   HONOLULU: "HNL", "SAN FRANCISCO": "SFO", SANFRANCISCO: "SFO", "LOS ANGELES": "LAX", SEATTLE: "SEA",
 };
 
@@ -316,7 +316,7 @@ export default function FlightDashboard() {
     return () => clearInterval(fr24Timer);
   }, [filterDate]);
 
-  // Lắng nghe dữ liệu và áp dụng thuật toán lan truyền TIA cho các chuyến liên danh
+  // Lắng nghe dữ liệu và lan truyền TIA cho toàn bộ chuyến liên danh
   useEffect(() => {
     setLoading(true);
     let day1Flights = [];
@@ -338,7 +338,6 @@ export default function FlightDashboard() {
       });
 
       // 2. THUẬT TOÁN LAN TRUYỀN DỮ LIỆU TIA CHO MỌI CHUYẾN LIÊN DANH
-      // Gom lại tất cả thông tin thực tế từ TIA theo: HướngBay_GiờKếHoạch_ĐiểmĐến_Ngày
       const physicalAircraftMap = new Map();
 
       opDayFlights.forEach((item) => {
