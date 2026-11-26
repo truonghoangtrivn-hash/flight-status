@@ -141,7 +141,6 @@ async function handleSync(request) {
   try {
     const { searchParams } = new URL(request.url);
 
-    // Quét trọn vẹn cả 24h của Ngày D (ví dụ 26-Nov) VÀ trọn vẹn 24h của Ngày D+1 (ví dụ 27-Nov)
     const opDate = searchParams.get("date") || getCurrentOperationalDate();
     const nextDate = getNextDayStr(opDate);
 
@@ -149,7 +148,7 @@ async function handleSync(request) {
     const day2Ref = doc(dbLite, "daily_sgn", nextDate);
     const viagsUrl = "https://viags.vn/en-US/flight-schedules";
 
-    // 1. Đọc 2 bản ghi ngày D & D+1 và tải ViewState gốc từ VIAGS cùng lúc
+    // 1. Đọc dữ liệu hiện có từ Firebase và tải ViewState từ VIAGS cùng lúc
     const [day1Snap, day2Snap, initialRes] = await Promise.all([
       getDoc(day1Ref),
       getDoc(day2Ref),
@@ -171,7 +170,7 @@ async function handleSync(request) {
     const viewStateGenerator = getInputValue(initHtml, "__VIEWSTATEGENERATOR") || "CA0B0334";
     const eventValidation = getInputValue(initHtml, "__EVENTVALIDATION");
 
-    // Quét toàn bộ 24h ("0000-2359") cho cả ngày D (26-Nov) và ngày D+1 (27-Nov)
+    // Quét toàn bộ lịch bay cả ngày D và D+1 từ VIAGS
     const scanJobs = [
       { scanDate: opDate, timeRange: "0000-2359", station: "DOM", trip: "D" },
       { scanDate: opDate, timeRange: "0000-2359", station: "DOM", trip: "A" },
@@ -255,7 +254,6 @@ async function handleSync(request) {
           stationType: job.station,
           tripType: job.trip,
           st,
-          et: (item.ET || "").trim(),
           airportName: normalizeAirport((item.AirportName || "").trim()),
           airlines: (item.Airlines || "").trim(),
           flightNo: cleanFlt,
@@ -263,21 +261,19 @@ async function handleSync(request) {
           updatedAt: new Date().toISOString(),
         };
 
-        if (existing) {
-          if (existing.hasTIAData) {
-            flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
-            flightRecord.remark = existing.remark || (item.Remark || "").trim();
-            flightRecord.terminal = existing.terminal || "";
-            flightRecord.checkinRow = job.trip === "D" ? existing.checkinRow || "" : "";
-            flightRecord.hasTIAData = true;
-          } else {
-            flightRecord.beltGate = (item.BeltGate || "").trim();
-            flightRecord.remark = (item.Remark || "").trim();
-          }
-          if (existing.fr24ETA) {
-            flightRecord.fr24ETA = existing.fr24ETA;
-          }
+        // QUY TẮC BẢO VỆ TUYỆT ĐỐI DỮ LIỆU TIA:
+        // Nếu TIA đã có dữ liệu -> GIỮ NGUYÊN 100% CẢ 3 TRƯỜNG: ETD, GATE, REMARK CỦA TIA!
+        if (existing && existing.hasTIAData) {
+          flightRecord.et = existing.et || (item.ET || "").trim(); // Ưu tiên ETD của TIA!
+          flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim(); // Ưu tiên GATE của TIA!
+          flightRecord.remark = existing.remark || (item.Remark || "").trim(); // Ưu tiên REMARK của TIA!
+          flightRecord.terminal = existing.terminal || "";
+          flightRecord.checkinRow = job.trip === "D" ? existing.checkinRow || "" : "";
+          flightRecord.hasTIAData = true;
+          if (existing.fr24ETA) flightRecord.fr24ETA = existing.fr24ETA;
         } else {
+          // Nếu TIA chưa có thông tin -> Lấy từ VIAGS làm dự phòng ban đầu
+          flightRecord.et = (item.ET || "").trim();
           flightRecord.beltGate = (item.BeltGate || "").trim();
           flightRecord.remark = (item.Remark || "").trim();
         }
@@ -288,7 +284,7 @@ async function handleSync(request) {
       }
     }
 
-    // Lưu trọn vẹn cả 2 ngày D (26-Nov) và D+1 (27-Nov) vào Firebase
+    // Lưu đầy đủ cả ngày D và ngày D+1 vào Firebase
     await Promise.all([
       setDoc(
         day1Ref,
@@ -314,7 +310,7 @@ async function handleSync(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã gộp lưu đầy đủ 24h cho cả 2 ngày (${totalUpdatedDay1} chuyến ngày ${opDate} + ${totalUpdatedDay2} chuyến ngày ${nextDate})!`,
+      message: `Đã cập nhật khung lịch bay VIAGS (${totalUpdatedDay1} chuyến ngày ${opDate} + ${totalUpdatedDay2} chuyến ngày ${nextDate})!`,
       opDate,
       nextDate,
       duration: `${(Date.now() - startTime) / 1000}s`,
