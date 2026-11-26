@@ -2,9 +2,9 @@ name: Auto Sync TIA Airport Flights
 
 on:
   schedule:
-    # Tự động quét mỗi 5 phút một lần suốt 24/7 (Mức tối đa của GitHub Actions)
-    - cron: '*/15 * * * *'
-  # Cho phép bấm nút chạy thủ công bất cứ lúc nào
+    # Quét định kỳ mỗi 30 phút một lần (Bảo đảm chạy êm ru 24/7 quanh năm không hết quota)
+    - cron: '*/30 * * * *'
+  # Vẫn cho phép bạn bấm nút chạy thủ công bất cứ khi nào cần
   workflow_dispatch:
 
 jobs:

@@ -179,7 +179,7 @@ export default function FlightDashboard() {
   const [filterAirline, setFilterAirline] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // 1. Lắng nghe trạng thái cập nhật thời gian thực từ đám mây
+  // 1. Lắng nghe trạng thái cập nhật thời gian thực từ đám mây (Firebase Realtime)
   useEffect(() => {
     const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
       if (docSnap.exists()) {
@@ -209,7 +209,7 @@ export default function FlightDashboard() {
     return () => unsubMeta();
   }, []);
 
-  // 2. Tự động kích hoạt làm mới ngầm Flightradar24 mỗi 60 giây khi mở trang web
+  // 2. Tự động kiểm tra làm mới ngầm mỗi 3 phút (180 giây) - Rất nhẹ nhàng, không giật lag
   useEffect(() => {
     const autoSyncFR24 = async () => {
       try {
@@ -217,7 +217,7 @@ export default function FlightDashboard() {
       } catch (e) {}
     };
     autoSyncFR24();
-    const fr24Timer = setInterval(autoSyncFR24, 60000);
+    const fr24Timer = setInterval(autoSyncFR24, 180000);
     return () => clearInterval(fr24Timer);
   }, []);
 
@@ -237,7 +237,7 @@ export default function FlightDashboard() {
           rawList.push(doc.data());
         });
 
-        // Chức năng ca trực 03:00 -> 03:00+ chạy ngầm chuẩn xác
+        // Áp dụng ca trực 03:00 -> 03:00+ hôm sau
         const opDayFlights = rawList.filter((f) => {
           const st = f.st || "";
           if (f.date === filterDate) {
@@ -291,7 +291,6 @@ export default function FlightDashboard() {
           }
         });
 
-        // Khử nhiễu liên danh VASCO / VNA
         const mergedList = Array.from(flightMap.values());
         const vascoDeparted = new Set();
 
@@ -383,7 +382,7 @@ export default function FlightDashboard() {
 
   return (
     <div className="container">
-      {/* Header tinh gọn: Bỏ chữ rườm rà */}
+      {/* Header tinh gọn: Bỏ chữ rườm rà, nhãn tự động 24/7 */}
       <div className="header-box">
         <div className="header-title">
           <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
@@ -425,7 +424,7 @@ export default function FlightDashboard() {
         </div>
       </div>
 
-      {/* Khung Bộ Lọc: Đã bỏ ô KHUNG GIỜ, nhãn NGÀY tinh gọn */}
+      {/* Khung Bộ Lọc */}
       <div className="filter-card">
         <div className="form-group">
           <label>Chuyến bay</label>
@@ -503,7 +502,7 @@ export default function FlightDashboard() {
         </div>
       </div>
 
-      {/* Dòng Thống kê tinh gọn: Bỏ chữ Ca trực và giải thích ngày */}
+      {/* Dòng Thống kê tinh gọn */}
       <div className="stats-bar">
         <span>
           Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay

@@ -30,7 +30,7 @@ function requestViags(url, options = {}) {
       agent: isHttps
         ? new https.Agent({ rejectUnauthorized: false, keepAlive: false })
         : undefined,
-      timeout: 8000,
+      timeout: 6000, // Tối đa 6 giây ngắt kết nối an toàn
     };
 
     const req = lib.request(url, reqOptions, (res) => {
@@ -114,7 +114,7 @@ async function handleSync(request) {
 
     let allFlights = [];
 
-    // Quét 4 nhóm chính của ngày hiện tại (mất khoảng 4 giây)
+    // 3. Quét 4 nhóm chính của ngày (chạy gọn gàng chỉ mất khoảng 2-3 giây)
     for (const task of scanTasks) {
       try {
         const formData = new URLSearchParams();
@@ -179,6 +179,7 @@ async function handleSync(request) {
               updatedAt: new Date().toISOString(),
             };
 
+            // Ưu tiên dữ liệu TIA nếu đã có quầy/cửa
             if (existing && existing.hasTIAData) {
               flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
               flightRecord.remark = existing.remark || (item.Remark || "").trim();
@@ -195,11 +196,11 @@ async function handleSync(request) {
           }
         }
       } catch (err) {
-        console.error("Lỗi quét nhóm:", task, err.message);
+        console.error("Bỏ qua lỗi nhóm:", task.station, task.trip, err.message);
       }
     }
 
-    // Lưu Firestore
+    // 4. Lưu đồng bộ hàng loạt vào Firestore
     let totalUpdated = 0;
     const chunkSize = 400;
     for (let i = 0; i < allFlights.length; i += chunkSize) {
