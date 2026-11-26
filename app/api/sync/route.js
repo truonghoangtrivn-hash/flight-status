@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore/lite";
-import https from "node:https";
 import http from "node:http";
 
-export const maxDuration = 30;
+export const maxDuration = 25;
 export const dynamic = "force-dynamic";
 
 const firebaseConfig = {
@@ -37,13 +36,10 @@ function getNextDayStr(dateStr) {
   return date.toISOString().split("T")[0];
 }
 
-// Hàm gửi yêu cầu mạng an toàn - TẮT KEEPALIVE ĐỂ KHÔNG BỊ LỖI SOCKET DISCONNECTED
-function requestViags(url, options = {}) {
+// Gọi qua HTTP cổng 80 thuần túy - Không bao giờ bị lỗi TLS/SSL hay đứt socket
+function requestViagsHttp(url, options = {}) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
-    const isHttps = urlObj.protocol === "https:";
-    const lib = isHttps ? https : http;
-
     const bodyBuffer = options.body ? Buffer.from(options.body, "utf-8") : null;
     const headers = { ...(options.headers || {}) };
     if (bodyBuffer) {
@@ -53,14 +49,10 @@ function requestViags(url, options = {}) {
     const reqOptions = {
       method: options.method || "GET",
       headers,
-      // Tắt keepAlive để mỗi yêu cầu mở socket mới tinh, chống rớt mạng TLS
-      agent: isHttps
-        ? new https.Agent({ rejectUnauthorized: false, keepAlive: false })
-        : undefined,
-      timeout: 12000,
+      timeout: 10000,
     };
 
-    const req = lib.request(url, reqOptions, (res) => {
+    const req = http.request(url, reqOptions, (res) => {
       let data = "";
       res.on("data", (chunk) => {
         data += chunk;
@@ -68,13 +60,6 @@ function requestViags(url, options = {}) {
       res.on("end", () => {
         resolve({
           status: res.statusCode,
-          headers: {
-            get: (name) => {
-              const val = res.headers[name.toLowerCase()];
-              if (Array.isArray(val)) return val.join("; ");
-              return val || "";
-            },
-          },
           text: async () => data,
         });
       });
@@ -83,7 +68,7 @@ function requestViags(url, options = {}) {
     req.on("error", (err) => reject(err));
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error("Timeout kết nối VIAGS"));
+      reject(new Error("Timeout kết nối HTTP VIAGS"));
     });
 
     if (bodyBuffer) {
@@ -119,14 +104,14 @@ async function handleSync(request) {
 
     const nextDayVn = getNextDayStr(todayVn);
 
-    // Mặc định tự động quét cả Hôm nay (26-Nov) và Ngày mai (27-Nov)
+    // Mặc định tự động nạp cả Hôm nay (26-Nov) và Ngày mai (27-Nov)
     const requestedDate = searchParams.get("date");
     const datesToSync = requestedDate ? [requestedDate] : [todayVn, nextDayVn];
 
-    const viagsUrl = "https://viags.vn/en-US/flight-schedules";
+    // DÙNG HTTP CỔNG 80 THUẦN TÚY GIỐNG HỆT TRÌNH DUYỆT CỦA BẠN
+    const viagsUrl = "http://viags.vn/en-US/flight-schedules";
 
-    // 1. Tải ViewState gốc từ VIAGS với socket mới
-    const initialRes = await requestViags(viagsUrl, {
+    const initialRes = await requestViagsHttp(viagsUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -149,7 +134,6 @@ async function handleSync(request) {
 
     let grandTotal = 0;
 
-    // 2. Nạp dữ liệu lần lượt cho từng ngày (mỗi nhóm gửi qua kết nối sạch)
     for (const targetDate of datesToSync) {
       const dayRef = doc(dbLite, "daily_sgn", targetDate);
       const daySnap = await getDoc(dayRef);
@@ -178,7 +162,7 @@ async function handleSync(request) {
             formData.append("ctl00$mainContent$ctl00$ddlScheduled", "0000-2359");
             formData.append("__ASYNCPOST", "true");
 
-            const response = await requestViags(viagsUrl, {
+            const response = await requestViagsHttp(viagsUrl, {
               method: "POST",
               headers: {
                 "User-Agent":
@@ -229,6 +213,7 @@ async function handleSync(request) {
             updatedAt: new Date().toISOString(),
           };
 
+          // Giữ nguyên ETD, GATE, REMARK của TIA
           if (existing && existing.hasTIAData) {
             flightRecord.et = existing.et || (item.ET || "").trim();
             flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
@@ -264,7 +249,7 @@ async function handleSync(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã nạp thành công ${grandTotal} chuyến bay cho các ngày: [${datesToSync.join(", ")}] chỉ mất ${(Date.now() - startTime) / 1000}s!`,
+      message: `Đã nạp thành công ${grandTotal} chuyến bay cho các ngày: [${datesToSync.join(", ")}] chỉ trong ${(Date.now() - startTime) / 1000}s!`,
       dates: datesToSync,
       totalFlights: grandTotal,
       duration: `${(Date.now() - startTime) / 1000}s`,
@@ -272,6 +257,4 @@ async function handleSync(request) {
     });
   } catch (error) {
     console.error("Lỗi đồng bộ VIAGS:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
-}
+    return NextResponse.json({ success: false, error: error.message }, {
