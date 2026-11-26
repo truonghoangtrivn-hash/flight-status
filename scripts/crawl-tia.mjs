@@ -1,8 +1,7 @@
 import puppeteer from "puppeteer";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, query, where, getDocs, doc, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore/lite";
 
-// Cấu hình Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyD5xJ95pYWckUcnbGzrD6mPUcYEFrwuUj8",
   authDomain: "flight-status-b0895.firebaseapp.com",
@@ -13,7 +12,7 @@ const firebaseConfig = {
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const dbLite = getFirestore(app);
 
 function normalizeAirport(name = "") {
   if (!name) return "";
@@ -57,7 +56,6 @@ function getNextDayStr(dateStr) {
   return date.toISOString().split("T")[0];
 }
 
-// 4 liên kết TIA
 const TIA_TARGETS = [
   { url: "https://tia.vietnamairport.vn/Depdom", tripType: "D", stationType: "DOM", name: "Đi Quốc Nội" },
   { url: "https://tia.vietnamairport.vn/Depint", tripType: "D", stationType: "INT", name: "Đi Quốc Tế" },
@@ -81,12 +79,10 @@ async function scrapeTIAPage(browser, target) {
   );
   await page.setViewport({ width: 1920, height: 1080 });
 
-  console.log(`[TIA Song Song] Bắt đầu tải: ${target.name}...`);
+  console.log(`[TIA Song Song] Đang tải: ${target.name}...`);
   try {
     await page.goto(target.url, { waitUntil: "networkidle2", timeout: 35000 });
-  } catch (e) {
-    // Bỏ qua lỗi timeout nhẹ
-  }
+  } catch (e) {}
 
   try {
     await page.waitForSelector("table.k-grid-table tbody tr.k-table-row", { timeout: 20000 });
@@ -155,7 +151,6 @@ async function scrapeTIAPage(browser, target) {
   }));
 }
 
-// Cào Flightradar24 và khóa theo Ngày_MãChuyếnBay
 async function scrapeFlightradar24(browser) {
   console.log("=== [FLIGHTRADAR24] BẮT ĐẦU CÀO GIỜ DỰ ĐÁP (ETA) ===");
   const frPage = await browser.newPage();
@@ -210,7 +205,6 @@ async function scrapeFlightradar24(browser) {
         const etaFormatted = formatVnTime(etaSec);
 
         if (flightNo && flightArrivalDate && etaFormatted) {
-          // Khóa khớp chính xác theo Ngày_MãChuyếnBay
           const exactKey = `${flightArrivalDate}_${flightNo}`;
           frMap.set(exactKey, etaFormatted);
         }
@@ -222,7 +216,7 @@ async function scrapeFlightradar24(browser) {
     await frPage.close();
   }
 
-  console.log(`[FR24] Đã lấy thành công ETA chính xác ngày của ${frMap.size} chuyến bay đến`);
+  console.log(`[FR24] Đã lấy thành công ETA của ${frMap.size} chuyến bay đến`);
   return frMap;
 }
 
@@ -247,7 +241,7 @@ async function main() {
   const todayCalStr = `${curYear}-${curMonth}-${curDay}`;
   const nextDayCalStr = getNextDayStr(todayCalStr);
 
-  console.log(`=== BẮT ĐẦU CÀO SONG SONG TIA & FR24 (GIỜ VN: ${curHour}h, NGÀY: ${todayCalStr}) ===`);
+  console.log(`=== BẮT ĐẦU CÀO SONG SONG TIA & FR24 (NGÀY: ${todayCalStr}) ===`);
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -268,30 +262,44 @@ async function main() {
   await browser.close();
 
   const allTIA = tiaResults.flat();
-  console.log(`=== TỔNG THU THẬP: ${allTIA.length} chuyến bay từ TIA (Chỉ mất ${(Date.now() - startTime) / 1000}s) ===`);
+  console.log(`=== TỔNG THU THẬP: ${allTIA.length} chuyến bay từ TIA ===`);
 
-  const arrivalSnap = await getDocs(
-    query(
-      collection(db, "flights_sgn"),
-      where("date", "in", [todayCalStr, nextDayCalStr]),
-      where("tripType", "==", "A")
-    )
-  );
+  // Đọc bản ghi gộp của ngày hôm nay (CHỈ 1 LƯỢT ĐỌC!)
+  const todayRef = doc(dbLite, "daily_sgn", todayCalStr);
+  const todaySnap = await getDoc(todayRef);
+  const todayFlights = todaySnap.exists() ? todaySnap.data().flights || {} : {};
 
-  const batch = writeBatch(db);
+  let nextFlights = null;
+  let nextRef = null;
 
   for (const f of allTIA) {
     const timeKey = (f.std || "").replace(/[^0-9]/g, "");
-
     let assignedDate = todayCalStr;
+
     if (curHour >= 18 && (f.std || "") < "03:00") {
       assignedDate = nextDayCalStr;
     }
 
-    const docId = `${assignedDate}_${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
-    const flightRef = doc(db, "flights_sgn", docId);
+    const flightKey = `${f.tripType}_${f.cleanFlightNo}_${timeKey}`;
+    const targetMap = assignedDate === todayCalStr ? todayFlights : (nextFlights || {});
 
-    const updateData = {
+    if (assignedDate === nextDayCalStr && !nextFlights) {
+      nextRef = doc(dbLite, "daily_sgn", nextDayCalStr);
+      const nextSnap = await getDoc(nextRef);
+      nextFlights = nextSnap.exists() ? nextSnap.data().flights || {} : {};
+    }
+
+    const activeMap = assignedDate === todayCalStr ? todayFlights : nextFlights;
+    const existing = activeMap[flightKey] || {};
+
+    const exactFRKey = `${assignedDate}_${f.cleanFlightNo}`;
+    const frETA = f.tripType === "A" && fr24ExactMap.has(exactFRKey)
+      ? fr24ExactMap.get(exactFRKey)
+      : existing.fr24ETA || null;
+
+    activeMap[flightKey] = {
+      ...existing,
+      id: `${assignedDate}_${flightKey}`,
       date: assignedDate,
       stationType: f.stationType,
       tripType: f.tripType,
@@ -304,51 +312,50 @@ async function main() {
       checkinRow: f.checkinRow,
       beltGate: f.beltGate,
       remark: f.remark,
+      fr24ETA: frETA,
       hasTIAData: true,
-      source: "TIA_ACV",
       updatedAt: new Date().toISOString(),
     };
-
-    // Khóa khớp FR24 theo đúng Ngày_MãBay
-    const exactFRKey = `${assignedDate}_${f.cleanFlightNo}`;
-    if (f.tripType === "A" && fr24ExactMap.has(exactFRKey)) {
-      updateData.fr24ETA = fr24ExactMap.get(exactFRKey);
-    }
-
-    batch.set(flightRef, updateData, { merge: true });
   }
 
-  // Dọn dẹp và cập nhật FR24 ETA cho các chuyến đến
-  arrivalSnap.forEach((docSnap) => {
-    const flightData = docSnap.data();
-    const cleanFlt = (flightData.flightNo || "").replace(/\s+/g, "").toUpperCase();
-    const docDate = flightData.date;
-    const exactFRKey = `${docDate}_${cleanFlt}`;
-
-    if (fr24ExactMap.has(exactFRKey)) {
-      const eta = fr24ExactMap.get(exactFRKey);
-      batch.set(docSnap.ref, { fr24ETA: eta }, { merge: true });
-    } else if (flightData.fr24ETA) {
-      // Tự động xóa bỏ giờ FR24 nếu bị gán nhầm ngày trước đó
-      batch.set(docSnap.ref, { fr24ETA: null }, { merge: true });
+  // Cập nhật FR24 ETA cho các chuyến đến trong ngày hôm nay
+  for (const [key, flt] of Object.entries(todayFlights)) {
+    if (flt.tripType === "A") {
+      const cleanFlt = (flt.flightNo || "").replace(/\s+/g, "").toUpperCase();
+      const exactFRKey = `${todayCalStr}_${cleanFlt}`;
+      if (fr24ExactMap.has(exactFRKey)) {
+        todayFlights[key].fr24ETA = fr24ExactMap.get(exactFRKey);
+      }
     }
-  });
+  }
 
-  const metaRef = doc(db, "meta", "sync_status");
-  batch.set(
-    metaRef,
+  // Lưu lại bản ghi gộp của ngày hôm nay (CHỈ 1 LƯỢT GHI!)
+  await setDoc(
+    todayRef,
     {
+      date: todayCalStr,
       lastUpdated: new Date().toISOString(),
-      tiaLastCount: allTIA.length,
-      fr24Count: fr24ExactMap.size,
-      source: "HYBRID PARALLEL (VIAGS + TIA + FR24)",
-      durationSec: Math.round((Date.now() - startTime) / 1000),
+      lastFR24Sync: new Date().toISOString(),
+      totalFlights: Object.keys(todayFlights).length,
+      flights: todayFlights,
     },
     { merge: true }
   );
 
-  await batch.commit();
-  console.log(`=== ĐÃ CẬP NHẬT CA TRỰC THÀNH CÔNG VÀO FIREBASE! (Tổng thời gian: ${(Date.now() - startTime) / 1000}s) ===`);
+  if (nextFlights && nextRef) {
+    await setDoc(
+      nextRef,
+      {
+        date: nextDayCalStr,
+        lastUpdated: new Date().toISOString(),
+        totalFlights: Object.keys(nextFlights).length,
+        flights: nextFlights,
+      },
+      { merge: true }
+    );
+  }
+
+  console.log(`=== ĐÃ GỘP LƯU CA TRỰC THÀNH CÔNG CHỈ VỚI 1 LƯỢT GHI! (${(Date.now() - startTime) / 1000}s) ===`);
   process.exit(0);
 }
 

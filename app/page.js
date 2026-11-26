@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
+import { onSnapshot, doc } from "firebase/firestore";
 
-// Bảng từ điển Hãng bay
+// Bảng từ điển Hãng bay mở rộng toàn diện
 const AIRLINE_DICT = {
   VN: "VIETNAM AIRLINES",
   "0V": "VASCO",
@@ -14,7 +14,17 @@ const AIRLINE_DICT = {
   QH: "BAMBOO AIRWAYS",
   VU: "VIETRAVEL AIRLINES",
   "9G": "9 AIR",
+  AQ: "9 AIR",
   K6: "CAMBODIA ANGKOR AIR",
+  KR: "CAMBODIA AIRWAYS",
+  LQ: "LANMEI AIRLINES",
+  QV: "LAO AIRLINES",
+  DR: "RUILI AIRLINES",
+  SC: "SHANDONG AIRLINES",
+  JX: "STARLUX AIRLINES",
+  "9C": "SPRING AIRLINES",
+  "5J": "CEBU PACIFIC AIR",
+  PR: "PHILIPPINE AIRLINES",
   GA: "GARUDA INDONESIA",
   TK: "TURKISH AIRLINES",
   CI: "CHINA AIRLINES",
@@ -22,22 +32,95 @@ const AIRLINE_DICT = {
   SQ: "SINGAPORE AIRLINES",
   TG: "THAI AIRWAYS",
   CX: "CATHAY PACIFIC",
+  UO: "HK EXPRESS",
+  HX: "HONG KONG AIRLINES",
+  HB: "GREATER BAY AIRLINES",
+  NX: "AIR MACAU",
   EK: "EMIRATES",
   QR: "QATAR AIRWAYS",
+  EY: "ETIHAD AIRWAYS",
   KE: "KOREAN AIR",
   OZ: "ASIANA AIRLINES",
+  YP: "AIR PREMIA",
+  "7C": "JEJU AIR",
+  LJ: "JIN AIR",
+  TW: "T'WAY AIR",
+  ZE: "EASTAR JET",
+  BX: "AIR BUSAN",
   JL: "JAPAN AIRLINES",
   NH: "ALL NIPPON AIRWAYS",
+  NQ: "AIR JAPAN",
+  MM: "PEACH AVIATION",
   CZ: "CHINA SOUTHERN AIRLINES",
   MU: "CHINA EASTERN AIRLINES",
+  FM: "SHANGHAI AIRLINES",
   CA: "AIR CHINA",
+  ZH: "SHENZHEN AIRLINES",
+  MF: "XIAMEN AIR",
+  "3U": "SICHUAN AIRLINES",
+  HU: "HAINAN AIRLINES",
+  HO: "JUNEYAO AIRLINES",
   TR: "SCOOT",
+  "3K": "JETSTAR ASIA",
+  JQ: "JETSTAR AIRWAYS",
+  QF: "QANTAS",
   AK: "AIRASIA",
   FD: "THAI AIRASIA",
+  QZ: "INDONESIA AIRASIA",
+  Z2: "PHILIPPINES AIRASIA",
+  D7: "AIRASIA X",
+  XJ: "THAI AIRASIA X",
+  OD: "BATIK AIR MALAYSIA",
+  ID: "BATIK AIR",
+  MH: "MALAYSIA AIRLINES",
+  BI: "ROYAL BRUNEI AIRLINES",
+  PG: "BANGKOK AIRWAYS",
+  SL: "THAI LION AIR",
+  VZ: "THAI VIETJET AIR",
+  "8M": "MYANMAR AIRWAYS INTL",
+  UB: "MYANMAR NATIONAL AIRLINES",
+  AI: "AIR INDIA",
+  "6E": "INDIGO",
+  UL: "SRILANKAN AIRLINES",
+  SU: "AEROFLOT",
+  T5: "TURKMENISTAN AIRLINES",
+  HY: "UZBEKISTAN AIRWAYS",
+  KC: "AIR ASTANA",
+  AF: "AIR FRANCE",
+  LH: "LUFTHANSA",
+  SK: "SCANDINAVIAN AIRLINES",
+  UA: "UNITED AIRLINES",
+  DL: "DELTA AIR LINES",
+  AA: "AMERICAN AIRLINES",
+  "5X": "UPS AIRLINES",
+  FX: "FEDEX EXPRESS",
+  CV: "CARGOLUX",
+  PO: "POLAR AIR CARGO",
+  "5Y": "ATLAS AIR",
+  K4: "KALITTA AIR",
+  O3: "SF AIRLINES",
+  CF: "CHINA POSTAL AIRLINES",
+  Y8: "SUPARNA AIRLINES",
+  VI: "VOLGA-DNEPR AIRLINES",
 };
 
-// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA
+// Danh sách các chuyến bay thực tế đi/đến sân bay TOKYO HANEDA (HND)
+// Tất cả các chuyến TOKYO còn lại (VN306, VN307, NH834, NH833, JL750, JL759, VJ822, VJ823...) đều là NARITA (NRT)
+const TOKYO_HANEDA_FLIGHTS = new Set([
+  "NH891",
+  "NH892",
+  "UA7974",
+  "JL70",
+  "JL070",
+  "JL79",
+  "JL079",
+  "VJ820",
+  "VJ821",
+]);
+
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN (BAO GỒM CẢ CÁC TÊN VIẾT SAI CHÍNH TẢ TỪ HỆ THỐNG GỐC)
 const IATA_MAP = {
+  // --- VIỆT NAM (NỘI ĐỊA) ---
   "HA NOI": "HAN", HANOI: "HAN", "NOI BAI": "HAN",
   HUE: "HUI", "PHU BAI": "HUI",
   "THANH HOA": "THD", "THO XUAN": "THD",
@@ -56,40 +139,77 @@ const IATA_MAP = {
   "CA MAU": "CAH", "CAN THO": "VCA",
   "RACH GIA": "VKG", "DIEN BIEN": "DIN",
   "VAN DON": "VDO", "QUANG NINH": "VDO",
+
+  // --- CÁC ĐỊA DANH MỚI & CÁCH VIẾT SAI CHÍNH TẢ TRÊN BẢNG GỐC ---
+  PAKSE: "PKZ",
+  "LIJIANG CITY": "LJG",
+  LIJIANG: "LJG",
+  QUINGDAO: "TAO", // Lỗi chính tả thừa chữ U của Shandong Airlines SC4646
+  QINGDAO: "TAO",
+  "BEJING CHINA": "PEK", // Lỗi chính tả thiếu chữ I của Air China CA904
+  "BEJING-CHINA": "PEK",
+  BEJING: "PEK",
+  "BEIJING CHINA": "PEK",
+  "BEIJING-CHINA": "PEK",
+  BEIJING: "PEK",
+  "BEIJING CAPITAL": "PEK",
+  "BEIJING DAXING": "PKX",
+  DAXING: "PKX",
+
+  // --- TRUNG QUỐC, HỒNG KÔNG, ĐÀI LOAN ---
   SHENZHEN: "SZX", SHENZEN: "SZX",
-  "BEIJING CHINA": "PEK", "BEIJING-CHINA": "PEK", BEIJING: "PEK", "BEIJING CAPITAL": "PEK",
-  "BEIJING DAXING": "PKX", DAXING: "PKX",
   SHANGHAI: "PVG", PUDONG: "PVG", HONGQIAO: "SHA",
   GUANGZHOU: "CAN", KUNMING: "KMG", NANJING: "NKG", CHENGDU: "TFU", CHONGQING: "CKG",
-  HANGZHOU: "HGH", WUHAN: "WUH", XIAMEN: "XMN", QINGDAO: "TAO", JINAN: "TNA",
+  HANGZHOU: "HGH", WUHAN: "WUH", XIAMEN: "XMN", JINAN: "TNA",
   SANYA: "SYX", HAIKOU: "HAK", NANNING: "NNG", ZHENGZHOU: "CGO", CHANGSHA: "CSX",
+  GUIYANG: "KWE", HARBIN: "HRB", SHENYANG: "SHE", LANZHOU: "LHW", WENZHOU: "WNZ",
+  NINGBO: "NGB", HEFEI: "HFE", NANCHANG: "KHN", TAIYUAN: "TYN", DALIAN: "DLC",
+  FUZHOU: "FOC", QUANZHOU: "JJN", JINJIANG: "JJN", WUXI: "WUX", TIANJIN: "TSN",
   HONGKONG: "HKG", "HONG KONG": "HKG", MACAU: "MFM", MACAO: "MFM",
-  TAIPEI: "TPE", TAOYUAN: "TPE", KAOHSIUNG: "KHH", TAICHUNG: "RMQ",
+  TAIPEI: "TPE", TAOYUAN: "TPE", KAOHSIUNG: "KHH", TAICHUNG: "RMQ", TAINAN: "TNN",
+
+  // --- ĐÔNG NAM Á ---
   "SIEM RIEP": "SAI", "SIEM REAP": "SAI", SIEMREAP: "SAI", SIEMRIEP: "SAI",
   "PHNOM PENH": "PNH", PHNOMPENH: "PNH", SIHANOUKVILLE: "KOS",
   BANGKOK: "BKK", SUVARNABHUMI: "BKK", "DON MUEANG": "DMK", "DON MUANG": "DMK",
   PHUKET: "HKT", "CHIANG MAI": "CNX",
   SINGAPORE: "SIN", CHANGI: "SIN", "KUALA LUMPUR": "KUL", KUALALUMPUR: "KUL",
-  PENANG: "PEN", KUCHING: "KCH",
+  PENANG: "PEN", KUCHING: "KCH", "KOTA KINABALU": "BKI",
   JAKARTA: "CGK", SEMARANG: "SRG", BALI: "DPS", DENPASAR: "DPS", SURABAYA: "SUB",
   MANILA: "MNL", CEBU: "CEB", CLARK: "CRK",
-  VIENTIANE: "VTE", "LUANG PRABANG": "LPQ", YANGON: "RGN", BRUNEI: "BWN",
-  TOKYO: "HND", HANEDA: "HND", "HANEDA-TOKYO, JAPAN": "HND", "HANEDA-TOKYO": "HND",
-  NARITA: "NRT", OSAKA: "KIX", KANSAI: "KIX", NAGOYA: "NGO", FUKUOKA: "FUK",
+  VIENTIANE: "VTE", "LUANG PRABANG": "LPQ", YANGON: "RGN", MANDALAY: "MDL", BRUNEI: "BWN",
+
+  // --- NHẬT BẢN & HÀN QUỐC ---
+  HANEDA: "HND", "HANEDA-TOKYO, JAPAN": "HND", "HANEDA-TOKYO": "HND",
+  NARITA: "NRT", "NARITA-TOKYO": "NRT",
+  OSAKA: "KIX", KANSAI: "KIX", NAGOYA: "NGO", FUKUOKA: "FUK", SAPPORO: "CTS", OKINAWA: "OKA",
   SEOUL: "ICN", INCHEON: "ICN", ANAA: "ICN", GIMPO: "GMP", BUSAN: "PUS", DAEGU: "TAE", JEJU: "CJU",
+
+  // --- CHÂU ÂU, TRUNG ĐÔNG, NAM Á, CHÂU ÚC, MỸ ---
   COPENHAGEN: "CPH", KOBENHAVN: "CPH", MUENCHEN: "MUC", MUNICH: "MUC",
   PARIS: "CDG", FRANKFURT: "FRA", LONDON: "LHR", AMSTERDAM: "AMS",
   ASHKHABAD: "ASB", ASHGABAT: "ASB", MOSCOW: "SVO", BARNAUL: "BAX", NOVOSIBIRSK: "OVB",
-  ALMATY: "ALA", TASHKENT: "TAS", ISTANBUL: "IST", DOHA: "DOH", DUBAI: "DXB",
+  ALMATY: "ALA", TASHKENT: "TAS", ISTANBUL: "IST", DOHA: "DOH", DUBAI: "DXB", "ABU DHABI": "AUH",
   BOMBAY: "BOM", MUMBAI: "BOM", "MUMBAI, INDIA": "BOM", DELHI: "DEL", "NEW DELHI": "DEL",
-  BENGALURU: "BLR", CHENNAI: "MAA", KOLKATA: "CCU", COLOMBO: "CMB",
-  SYDNEY: "SYD", MELBOURNE: "MEL", BRISBANE: "BNE", PERTH: "PER", AUCKLAND: "AKL",
-  HONOLULU: "HNL", "SAN FRANCISCO": "SFO", SANFRANCISCO: "SFO", "LOS ANGELES": "LAX",
+  BENGALURU: "BLR", BANGALORE: "BLR", CHENNAI: "MAA", KOLKATA: "CCU", HYDERABAD: "HYD",
+  AHMEDABAD: "AMD", KOCHI: "COK", COLOMBO: "CMB",
+  SYDNEY: "SYD", MELBOURNE: "MEL", BRISBANE: "BNE", PERTH: "PER", ADELAIDE: "ADL", AUCKLAND: "AKL",
+  HONOLULU: "HNL", "SAN FRANCISCO": "SFO", SANFRANCISCO: "SFO", "LOS ANGELES": "LAX", SEATTLE: "SEA",
 };
 
 const SORTED_IATA_KEYS = Object.keys(IATA_MAP).sort((a, b) => b.length - a.length);
 
-function toIATA(name = "") {
+// Hàm chuẩn hóa số hiệu chuyến bay (Xử lý lỗi dính tiền tố "00" ở chuyến hàng hóa/thuê chuyến như 00VHLLJ, 00VI8114)
+function normalizeFlightNumber(rawFlt = "") {
+  let clean = (rawFlt || "").replace(/\s+/g, "").toUpperCase();
+  if (clean.startsWith("00") && clean.length > 4) {
+    clean = clean.slice(2);
+  }
+  return clean;
+}
+
+// Hàm chuyển đổi sang mã IATA 3 chữ cái (Phân biệt chính xác Tokyo Narita NRT vs Haneda HND theo số hiệu chuyến bay)
+function toIATA(name = "", flightNo = "") {
   if (!name) return "";
   let clean = name
     .normalize("NFD")
@@ -101,21 +221,48 @@ function toIATA(name = "") {
     .toUpperCase()
     .trim();
 
-  if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) return clean;
-  if (IATA_MAP[clean]) return IATA_MAP[clean];
+  const cleanFlt = normalizeFlightNumber(flightNo);
 
+  // 1. Xử lý chuyên biệt cho TOKYO / TYO / HND / NRT
+  if (clean.includes("NARITA") || clean === "NRT") {
+    return "NRT";
+  }
+  if (clean.includes("HANEDA")) {
+    return "HND";
+  }
+  if (clean.includes("TOKYO") || clean === "TYO" || clean === "HND") {
+    // Nếu số hiệu chuyến bay nằm trong danh sách bay Haneda (NH892, JL070, VJ820...) -> HND
+    if (TOKYO_HANEDA_FLIGHTS.has(cleanFlt)) {
+      return "HND";
+    }
+    // Ngược lại (NH834, JL750, VN306, VN307, VJ822...) -> Thực tế hạ cánh tại Narita (NRT)
+    return "NRT";
+  }
+
+  // 2. Nếu bản thân đã là mã IATA 3 chữ cái chuẩn
+  if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) {
+    return clean;
+  }
+
+  // 3. Khớp chính xác trong từ điển
+  if (IATA_MAP[clean]) {
+    return IATA_MAP[clean];
+  }
+
+  // 4. Khớp theo từ khóa ưu tiên chuỗi dài
   for (const key of SORTED_IATA_KEYS) {
     const cleanKey = key.replace(/[-_.,]/g, " ");
     if (clean === cleanKey || clean.includes(cleanKey) || cleanKey.includes(clean)) {
       return IATA_MAP[key];
     }
   }
+
   return clean;
 }
 
 function resolveAirlineName(flightNo = "", existingAirline = "") {
   if (existingAirline && existingAirline.trim() !== "") return existingAirline.trim();
-  const clean = flightNo.replace(/\s+/g, "").toUpperCase();
+  const clean = normalizeFlightNumber(flightNo);
   const prefix2 = clean.slice(0, 2);
   if (AIRLINE_DICT[prefix2]) return AIRLINE_DICT[prefix2];
   return "-";
@@ -179,160 +326,159 @@ export default function FlightDashboard() {
   const [filterAirline, setFilterAirline] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // 1. Lắng nghe trạng thái cập nhật thời gian thực từ đám mây (Firebase Realtime)
-  useEffect(() => {
-    const unsubMeta = onSnapshot(doc(db, "meta", "sync_status"), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.lastUpdated) {
-          const dateObj = new Date(data.lastUpdated);
-          setLastSyncTime(
-            dateObj.toLocaleTimeString("vi-VN", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            })
-          );
-        }
-        if (data.lastFR24Sync) {
-          const fr24Date = new Date(data.lastFR24Sync);
-          setLastFR24Time(
-            fr24Date.toLocaleTimeString("vi-VN", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            })
-          );
-        }
-      }
-    });
-    return () => unsubMeta();
-  }, []);
-
-  // 2. Tự động kiểm tra làm mới ngầm mỗi 3 phút (180 giây) - Rất nhẹ nhàng, không giật lag
-  useEffect(() => {
-    const autoSyncFR24 = async () => {
-      try {
-        await fetch("/api/sync-fr24");
-      } catch (e) {}
-    };
-    autoSyncFR24();
-    const fr24Timer = setInterval(autoSyncFR24, 180000);
-    return () => clearInterval(fr24Timer);
-  }, []);
-
-  // 3. Lắng nghe dữ liệu ca trực (03:00 -> 03:00+ hôm sau) từ Firestore
+  // Lắng nghe dữ liệu từ 2 bản ghi gộp (Chỉ tốn 2 lượt Đọc!)
   useEffect(() => {
     setLoading(true);
-    const q = query(
-      collection(db, "flights_sgn"),
-      where("date", "in", [filterDate, nextDateStr])
-    );
+    let day1Flights = [];
+    let day2Flights = [];
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const rawList = [];
-        snapshot.forEach((doc) => {
-          rawList.push(doc.data());
-        });
+    const processAndCombine = () => {
+      const rawList = [...day1Flights, ...day2Flights];
 
-        // Áp dụng ca trực 03:00 -> 03:00+ hôm sau
-        const opDayFlights = rawList.filter((f) => {
-          const st = f.st || "";
-          if (f.date === filterDate) {
-            return st >= "03:00";
+      // Áp dụng ca trực 03:00 -> 03:00+ hôm sau
+      const opDayFlights = rawList.filter((f) => {
+        const st = f.st || "";
+        if (f.date === filterDate) {
+          return st >= "03:00";
+        }
+        if (f.date === nextDateStr) {
+          return st < "03:00";
+        }
+        return false;
+      });
+
+      const flightMap = new Map();
+
+      opDayFlights.forEach((item) => {
+        const cleanFlt = normalizeFlightNumber(item.flightNo);
+        const cleanSt = (item.st || "").replace(/[^0-9]/g, "");
+        const cleanApt = cleanAirportName(item.airportName);
+
+        const uniqueKey = `${item.tripType || "D"}_${cleanFlt}_${cleanSt}_${item.date}`;
+
+        if (!flightMap.has(uniqueKey)) {
+          flightMap.set(uniqueKey, {
+            ...item,
+            flightNo: cleanFlt,
+            airportName: cleanApt,
+            isNextDay: item.date === nextDateStr,
+          });
+        } else {
+          const prev = flightMap.get(uniqueKey);
+          const hasMoreInfo =
+            (item.beltGate && !prev.beltGate) ||
+            (item.terminal && !prev.terminal) ||
+            (item.checkinRow && !prev.checkinRow) ||
+            (item.fr24ETA && !prev.fr24ETA) ||
+            (item.hasTIAData && !prev.hasTIAData);
+
+          flightMap.set(uniqueKey, {
+            ...prev,
+            ...(hasMoreInfo ? item : {}),
+            flightNo: cleanFlt,
+            airportName: cleanApt || prev.airportName,
+            beltGate: item.beltGate || prev.beltGate,
+            terminal: item.terminal || prev.terminal,
+            checkinRow: item.checkinRow || prev.checkinRow,
+            fr24ETA: item.fr24ETA || prev.fr24ETA,
+            remark: item.hasTIAData ? item.remark : prev.remark || item.remark,
+            airlines: prev.airlines || item.airlines,
+            isNextDay: item.date === nextDateStr,
+          });
+        }
+      });
+
+      const mergedList = Array.from(flightMap.values());
+      const vascoDeparted = new Set();
+
+      mergedList.forEach((f) => {
+        const r = (f.remark || "").toLowerCase();
+        if (f.flightNo.startsWith("0V") && (r.includes("departed") || f.beltGate)) {
+          vascoDeparted.add(`${f.st}_${f.airportName}_${f.date}`);
+        }
+      });
+
+      const finalList = mergedList.filter((f) => {
+        const r = (f.remark || "").toLowerCase();
+        if (f.flightNo.startsWith("VN") && r.includes("cancel")) {
+          if (vascoDeparted.has(`${f.st}_${f.airportName}_${f.date}`)) {
+            return false;
           }
-          if (f.date === nextDateStr) {
-            return st < "03:00";
+        }
+        return true;
+      });
+
+      finalList.sort((a, b) => {
+        const getWeight = (item) => {
+          const [h, m] = (item.st || "00:00").split(":").map(Number);
+          if (item.isNextDay || (item.st || "") < "03:00") {
+            return (h + 24) * 60 + (m || 0);
           }
-          return false;
-        });
+          return h * 60 + (m || 0);
+        };
+        return getWeight(a) - getWeight(b);
+      });
 
-        // Khử trùng lặp
-        const flightMap = new Map();
+      setFlights(finalList);
+      setLoading(false);
+    };
 
-        opDayFlights.forEach((item) => {
-          const cleanFlt = (item.flightNo || "").replace(/\s+/g, "").toUpperCase();
-          const cleanSt = (item.st || "").replace(/[^0-9]/g, "");
-          const cleanApt = cleanAirportName(item.airportName);
-
-          const uniqueKey = `${item.tripType || "D"}_${cleanFlt}_${cleanSt}_${item.date}`;
-
-          if (!flightMap.has(uniqueKey)) {
-            flightMap.set(uniqueKey, {
-              ...item,
-              flightNo: cleanFlt,
-              airportName: cleanApt,
-              isNextDay: item.date === nextDateStr,
-            });
-          } else {
-            const prev = flightMap.get(uniqueKey);
-            const hasMoreInfo =
-              (item.beltGate && !prev.beltGate) ||
-              (item.terminal && !prev.terminal) ||
-              (item.checkinRow && !prev.checkinRow) ||
-              (item.fr24ETA && !prev.fr24ETA) ||
-              (item.hasTIAData && !prev.hasTIAData);
-
-            flightMap.set(uniqueKey, {
-              ...prev,
-              ...(hasMoreInfo ? item : {}),
-              flightNo: cleanFlt,
-              airportName: cleanApt || prev.airportName,
-              beltGate: item.beltGate || prev.beltGate,
-              terminal: item.terminal || prev.terminal,
-              checkinRow: item.checkinRow || prev.checkinRow,
-              fr24ETA: item.fr24ETA || prev.fr24ETA,
-              remark: item.hasTIAData ? item.remark : prev.remark || item.remark,
-              airlines: prev.airlines || item.airlines,
-              isNextDay: item.date === nextDateStr,
-            });
+    const unsub1 = onSnapshot(
+      doc(db, "daily_sgn", filterDate),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.lastUpdated) {
+            setLastSyncTime(
+              new Date(data.lastUpdated).toLocaleTimeString("vi-VN", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })
+            );
           }
-        });
-
-        const mergedList = Array.from(flightMap.values());
-        const vascoDeparted = new Set();
-
-        mergedList.forEach((f) => {
-          const r = (f.remark || "").toLowerCase();
-          if (f.flightNo.startsWith("0V") && (r.includes("departed") || f.beltGate)) {
-            vascoDeparted.add(`${f.st}_${f.airportName}_${f.date}`);
+          if (data.lastFR24Sync) {
+            setLastFR24Time(
+              new Date(data.lastFR24Sync).toLocaleTimeString("vi-VN", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })
+            );
           }
-        });
-
-        const finalList = mergedList.filter((f) => {
-          const r = (f.remark || "").toLowerCase();
-          if (f.flightNo.startsWith("VN") && r.includes("cancel")) {
-            if (vascoDeparted.has(`${f.st}_${f.airportName}_${f.date}`)) {
-              return false;
-            }
-          }
-          return true;
-        });
-
-        // Sắp xếp ca trực: 03:00 -> 23:59 rồi đến 00:00 -> 02:59
-        finalList.sort((a, b) => {
-          const getWeight = (item) => {
-            const [h, m] = (item.st || "00:00").split(":").map(Number);
-            if (item.isNextDay || (item.st || "") < "03:00") {
-              return (h + 24) * 60 + (m || 0);
-            }
-            return h * 60 + (m || 0);
-          };
-          return getWeight(a) - getWeight(b);
-        });
-
-        setFlights(finalList);
-        setLoading(false);
+          day1Flights = Object.values(data.flights || {});
+        } else {
+          day1Flights = [];
+        }
+        processAndCombine();
       },
-      (error) => {
-        console.error("Lỗi đọc Firestore:", error);
+      (err) => {
+        console.error("Lỗi đọc ngày 1:", err);
         setLoading(false);
       }
     );
 
-    return () => unsubscribe();
+    const unsub2 = onSnapshot(
+      doc(db, "daily_sgn", nextDateStr),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          day2Flights = Object.values(data.flights || {});
+        } else {
+          day2Flights = [];
+        }
+        processAndCombine();
+      },
+      (err) => {
+        console.error("Lỗi đọc ngày 2:", err);
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
   }, [filterDate, nextDateStr]);
 
   const filteredFlights = useMemo(() => {
@@ -341,7 +487,7 @@ export default function FlightDashboard() {
       if (f.stationType !== filterStation) return false;
 
       const airlineName = resolveAirlineName(f.flightNo, f.airlines);
-      const iataCode = toIATA(f.airportName);
+      const iataCode = toIATA(f.airportName, f.flightNo);
 
       if (filterAirline === "VNA") {
         const isVna =
@@ -382,7 +528,6 @@ export default function FlightDashboard() {
 
   return (
     <div className="container">
-      {/* Header tinh gọn: Bỏ chữ rườm rà, nhãn tự động 24/7 */}
       <div className="header-box">
         <div className="header-title">
           <h1>FLIGHT INFORMATION - TÂN SƠN NHẤT (SGN)</h1>
@@ -495,14 +640,13 @@ export default function FlightDashboard() {
           <input
             type="text"
             className="form-control"
-            placeholder="Mã chuyến, IATA (HAN, SFO, BKK)..."
+            placeholder="Mã chuyến, IATA (NRT, HND, PKZ, LJG)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
       </div>
 
-      {/* Dòng Thống kê tinh gọn */}
       <div className="stats-bar">
         <span>
           Đang hiển thị: <strong>{filteredFlights.length}</strong> chuyến bay
@@ -538,7 +682,7 @@ export default function FlightDashboard() {
             ) : filteredFlights.length > 0 ? (
               filteredFlights.map((item) => {
                 const airlineName = resolveAirlineName(item.flightNo, item.airlines);
-                const iataCode = toIATA(item.airportName);
+                const iataCode = toIATA(item.airportName, item.flightNo);
 
                 return (
                   <tr key={`${item.flightNo}_${item.st}_${item.date}`}>

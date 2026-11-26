@@ -1,14 +1,6 @@
 import { NextResponse } from "next/server";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import {
-  getFirestore,
-  collection,
-  query,
-  where,
-  getDocs,
-  writeBatch,
-  doc,
-} from "firebase/firestore/lite";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore/lite";
 
 export const maxDuration = 20;
 export const dynamic = "force-dynamic";
@@ -47,13 +39,6 @@ function getVnDateFromTimestamp(timestampSec) {
   }).format(d);
 }
 
-function getNextDayStr(dateStr) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().split("T")[0];
-}
-
 export async function GET(request) {
   return await handleSyncFR24(request);
 }
@@ -69,9 +54,7 @@ async function handleSyncFR24(request) {
       timeZone: "Asia/Ho_Chi_Minh",
     }).format(new Date());
 
-    const nextDateVn = getNextDayStr(todayVn);
-
-    // 1. Gọi API Flightradar24 với khóa bảo vệ timeout 8 giây
+    // 1. Gọi API Flightradar24
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -127,69 +110,49 @@ async function handleSyncFR24(request) {
       }
     });
 
-    // 2. Truy vấn và lưu bằng Firestore Lite (Stateless HTTP - Không bao giờ bị treo)
-    const arrivalSnap = await getDocs(
-      query(
-        collection(dbLite, "flights_sgn"),
-        where("tripType", "==", "A"),
-        where("date", "in", [todayVn, nextDateVn])
-      )
-    );
+    // 2. CHỈ TỐN 1 LƯỢT ĐỌC DUY NHẤT: Đọc bản ghi gộp của ngày hôm nay
+    const dayRef = doc(dbLite, "daily_sgn", todayVn);
+    const daySnap = await getDoc(dayRef);
 
     let updatedCount = 0;
-    let clearedCount = 0;
-    const batch = writeBatch(dbLite);
 
-    arrivalSnap.forEach((docSnap) => {
-      const flightData = docSnap.data();
-      const cleanFlt = (flightData.flightNo || "").replace(/\s+/g, "").toUpperCase();
-      const docDate = flightData.date;
+    if (daySnap.exists()) {
+      const dayData = daySnap.data();
+      const flightsMap = dayData.flights || {};
 
-      const exactKey = `${docDate}_${cleanFlt}`;
+      for (const [key, flt] of Object.entries(flightsMap)) {
+        if (flt.tripType === "A") {
+          const cleanFlt = (flt.flightNo || "").replace(/\s+/g, "").toUpperCase();
+          const exactKey = `${todayVn}_${cleanFlt}`;
 
-      if (fr24ExactMap.has(exactKey)) {
-        const info = fr24ExactMap.get(exactKey);
-        batch.set(
-          docSnap.ref,
-          {
-            fr24ETA: info.eta,
-            fr24Status: info.status,
-            fr24UpdatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-        updatedCount++;
-      } else if (flightData.fr24ETA) {
-        batch.set(
-          docSnap.ref,
-          {
-            fr24ETA: null,
-            fr24Status: null,
-          },
-          { merge: true }
-        );
-        clearedCount++;
+          if (fr24ExactMap.has(exactKey)) {
+            const info = fr24ExactMap.get(exactKey);
+            flightsMap[key] = {
+              ...flt,
+              fr24ETA: info.eta,
+              fr24Status: info.status,
+            };
+            updatedCount++;
+          }
+        }
       }
-    });
 
-    const metaRef = doc(dbLite, "meta", "sync_status");
-    batch.set(
-      metaRef,
-      {
-        lastFR24Sync: new Date().toISOString(),
-        fr24LiveCount: fr24ExactMap.size,
-      },
-      { merge: true }
-    );
-
-    await batch.commit();
+      // 3. CHỈ TỐN 1 LƯỢT GHI DUY NHẤT: Cập nhật lại bản ghi của ngày hôm nay
+      await setDoc(
+        dayRef,
+        {
+          lastFR24Sync: new Date().toISOString(),
+          flights: flightsMap,
+        },
+        { merge: true }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      message: `Cập nhật ${updatedCount} chuyến bay trong ${(Date.now() - startTime) / 1000}s!`,
+      message: `Đã cập nhật FR24 cho ${updatedCount} chuyến bay chỉ với 1 lượt Ghi!`,
       totalFR24: fr24ExactMap.size,
       updatedInFirestore: updatedCount,
-      clearedWrongDates: clearedCount,
       duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),
     });

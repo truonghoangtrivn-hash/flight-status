@@ -1,14 +1,6 @@
 import { NextResponse } from "next/server";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import {
-  getFirestore,
-  collection,
-  query,
-  where,
-  getDocs,
-  doc,
-  writeBatch,
-} from "firebase/firestore/lite";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore/lite";
 import https from "node:https";
 import http from "node:http";
 
@@ -103,12 +95,10 @@ async function handleSync(request) {
 
     const targetDate = searchParams.get("date") || todayVn;
 
-    // 1. Tải nhanh các chuyến bay hiện có bằng Firestore Lite (Stateless HTTP)
-    const existingSnap = await getDocs(
-      query(collection(dbLite, "flights_sgn"), where("date", "==", targetDate))
-    );
-    const existingMap = new Map();
-    existingSnap.forEach((d) => existingMap.set(d.id, d.data()));
+    // 1. CHỈ TỐN 1 LƯỢT ĐỌC DUY NHẤT: Lấy bản ghi gộp của ngày targetDate
+    const dayRef = doc(dbLite, "daily_sgn", targetDate);
+    const daySnap = await getDoc(dayRef);
+    const flightsMap = daySnap.exists() ? daySnap.data().flights || {} : {};
 
     // 2. Lấy ViewState ban đầu từ VIAGS
     const initialRes = await requestViags("https://www.viags.vn/en-US/flight-schedules", {
@@ -132,9 +122,9 @@ async function handleSync(request) {
       { station: "INT", trip: "A" },
     ];
 
-    let allFlights = [];
+    let totalUpdated = 0;
 
-    // 3. Quét 4 nhóm chính
+    // 3. Quét 4 nhóm chính của VIAGS
     for (const task of scanTasks) {
       try {
         const formData = new URLSearchParams();
@@ -179,11 +169,11 @@ async function handleSync(request) {
             const cleanFlt = rawFlt.replace(/\s+/g, "").toUpperCase();
             const timeKey = (item.ST || "").replace(/[^0-9]/g, "");
 
-            const docId = `${targetDate}_${task.trip}_${cleanFlt}_${timeKey}`;
-            const existing = existingMap.get(docId);
+            const flightKey = `${task.trip}_${cleanFlt}_${timeKey}`;
+            const existing = flightsMap[flightKey];
 
             const flightRecord = {
-              id: docId,
+              id: `${targetDate}_${flightKey}`,
               sortOrder: idx,
               date: targetDate,
               stationType: task.station,
@@ -194,24 +184,31 @@ async function handleSync(request) {
               airlines: (item.Airlines || "").trim(),
               flightNo: cleanFlt,
               displayFlightNo: rawFlt,
-              areaName: "HO CHI MINH CITY",
-              source: existing && existing.hasTIAData ? "HYBRID (VIAGS + TIA)" : "VIAGS",
               updatedAt: new Date().toISOString(),
             };
 
-            if (existing && existing.hasTIAData) {
-              flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
-              flightRecord.remark = existing.remark || (item.Remark || "").trim();
-              flightRecord.terminal = existing.terminal || "";
-              flightRecord.checkinRow = existing.checkinRow || "";
-              flightRecord.hasTIAData = true;
-              if (existing.fr24ETA) flightRecord.fr24ETA = existing.fr24ETA;
+            // Bảo vệ dữ liệu TIA và FR24 nếu đã có sẵn
+            if (existing) {
+              if (existing.hasTIAData) {
+                flightRecord.beltGate = existing.beltGate || (item.BeltGate || "").trim();
+                flightRecord.remark = existing.remark || (item.Remark || "").trim();
+                flightRecord.terminal = existing.terminal || "";
+                flightRecord.checkinRow = existing.checkinRow || "";
+                flightRecord.hasTIAData = true;
+              } else {
+                flightRecord.beltGate = (item.BeltGate || "").trim();
+                flightRecord.remark = (item.Remark || "").trim();
+              }
+              if (existing.fr24ETA) {
+                flightRecord.fr24ETA = existing.fr24ETA;
+              }
             } else {
               flightRecord.beltGate = (item.BeltGate || "").trim();
               flightRecord.remark = (item.Remark || "").trim();
             }
 
-            allFlights.push(flightRecord);
+            flightsMap[flightKey] = flightRecord;
+            totalUpdated++;
           }
         }
       } catch (err) {
@@ -219,38 +216,21 @@ async function handleSync(request) {
       }
     }
 
-    // 4. Lưu vào Firestore bằng Lite SDK (Tức thời, không giữ socket)
-    let totalUpdated = 0;
-    const chunkSize = 400;
-    for (let i = 0; i < allFlights.length; i += chunkSize) {
-      const chunk = allFlights.slice(i, i + chunkSize);
-      const batch = writeBatch(dbLite);
-
-      for (const flight of chunk) {
-        const flightRef = doc(dbLite, "flights_sgn", flight.id);
-        batch.set(flightRef, flight, { merge: true });
-      }
-
-      await batch.commit();
-      totalUpdated += chunk.length;
-    }
-
-    const metaBatch = writeBatch(dbLite);
-    const metaRef = doc(dbLite, "meta", "sync_status");
-    metaBatch.set(
-      metaRef,
+    // 4. CHỈ TỐN 1 LƯỢT GHI DUY NHẤT: Lưu toàn bộ chuyến bay trong ngày vào 1 bản ghi
+    await setDoc(
+      dayRef,
       {
+        date: targetDate,
         lastUpdated: new Date().toISOString(),
-        totalFlightsVIAGS: totalUpdated,
-        status: "success",
+        totalFlights: Object.keys(flightsMap).length,
+        flights: flightsMap,
       },
       { merge: true }
     );
-    await metaBatch.commit();
 
     return NextResponse.json({
       success: true,
-      message: `Đồng bộ VIAGS thành công (${totalUpdated} chuyến bay)!`,
+      message: `Đã gộp lưu ${totalUpdated} chuyến bay chỉ với 1 lượt Ghi!`,
       date: targetDate,
       duration: `${(Date.now() - startTime) / 1000}s`,
       timestamp: new Date().toISOString(),
