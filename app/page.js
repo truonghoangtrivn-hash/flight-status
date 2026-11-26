@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import { onSnapshot, doc } from "firebase/firestore";
 
-// Bảng từ điển Hãng bay mở rộng toàn diện
+// Bảng từ điển Hãng bay mở rộng
 const AIRLINE_DICT = {
   VN: "VIETNAM AIRLINES",
   "0V": "VASCO",
@@ -104,8 +104,7 @@ const AIRLINE_DICT = {
   VI: "VOLGA-DNEPR AIRLINES",
 };
 
-// Danh sách các chuyến bay thực tế đi/đến sân bay TOKYO HANEDA (HND)
-// Tất cả các chuyến TOKYO còn lại (VN306, VN307, NH834, NH833, JL750, JL759, VJ822, VJ823...) đều là NARITA (NRT)
+// Chuyến bay đi Tokyo Haneda (HND). Các chuyến khác mặc định đi Narita (NRT)
 const TOKYO_HANEDA_FLIGHTS = new Set([
   "NH891",
   "NH892",
@@ -118,9 +117,8 @@ const TOKYO_HANEDA_FLIGHTS = new Set([
   "VJ821",
 ]);
 
-// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA TOÀN DIỆN (BAO GỒM CẢ CÁC TÊN VIẾT SAI CHÍNH TẢ TỪ HỆ THỐNG GỐC)
+// BẢNG TỪ ĐIỂN MÃ SÂN BAY IATA
 const IATA_MAP = {
-  // --- VIỆT NAM (NỘI ĐỊA) ---
   "HA NOI": "HAN", HANOI: "HAN", "NOI BAI": "HAN",
   HUE: "HUI", "PHU BAI": "HUI",
   "THANH HOA": "THD", "THO XUAN": "THD",
@@ -140,23 +138,13 @@ const IATA_MAP = {
   "RACH GIA": "VKG", "DIEN BIEN": "DIN",
   "VAN DON": "VDO", "QUANG NINH": "VDO",
 
-  // --- CÁC ĐỊA DANH MỚI & CÁCH VIẾT SAI CHÍNH TẢ TRÊN BẢNG GỐC ---
   PAKSE: "PKZ",
-  "LIJIANG CITY": "LJG",
-  LIJIANG: "LJG",
-  QUINGDAO: "TAO", // Lỗi chính tả thừa chữ U của Shandong Airlines SC4646
-  QINGDAO: "TAO",
-  "BEJING CHINA": "PEK", // Lỗi chính tả thiếu chữ I của Air China CA904
-  "BEJING-CHINA": "PEK",
-  BEJING: "PEK",
-  "BEIJING CHINA": "PEK",
-  "BEIJING-CHINA": "PEK",
-  BEIJING: "PEK",
-  "BEIJING CAPITAL": "PEK",
-  "BEIJING DAXING": "PKX",
-  DAXING: "PKX",
+  "LIJIANG CITY": "LJG", LIJIANG: "LJG",
+  QUINGDAO: "TAO", QINGDAO: "TAO",
+  "BEJING CHINA": "PEK", "BEJING-CHINA": "PEK", BEJING: "PEK",
+  "BEIJING CHINA": "PEK", "BEIJING-CHINA": "PEK", BEIJING: "PEK",
+  "BEIJING CAPITAL": "PEK", "BEIJING DAXING": "PKX", DAXING: "PKX",
 
-  // --- TRUNG QUỐC, HỒNG KÔNG, ĐÀI LOAN ---
   SHENZHEN: "SZX", SHENZEN: "SZX",
   SHANGHAI: "PVG", PUDONG: "PVG", HONGQIAO: "SHA",
   GUANGZHOU: "CAN", KUNMING: "KMG", NANJING: "NKG", CHENGDU: "TFU", CHONGQING: "CKG",
@@ -168,7 +156,6 @@ const IATA_MAP = {
   HONGKONG: "HKG", "HONG KONG": "HKG", MACAU: "MFM", MACAO: "MFM",
   TAIPEI: "TPE", TAOYUAN: "TPE", KAOHSIUNG: "KHH", TAICHUNG: "RMQ", TAINAN: "TNN",
 
-  // --- ĐÔNG NAM Á ---
   "SIEM RIEP": "SAI", "SIEM REAP": "SAI", SIEMREAP: "SAI", SIEMRIEP: "SAI",
   "PHNOM PENH": "PNH", PHNOMPENH: "PNH", SIHANOUKVILLE: "KOS",
   BANGKOK: "BKK", SUVARNABHUMI: "BKK", "DON MUEANG": "DMK", "DON MUANG": "DMK",
@@ -179,13 +166,11 @@ const IATA_MAP = {
   MANILA: "MNL", CEBU: "CEB", CLARK: "CRK",
   VIENTIANE: "VTE", "LUANG PRABANG": "LPQ", YANGON: "RGN", MANDALAY: "MDL", BRUNEI: "BWN",
 
-  // --- NHẬT BẢN & HÀN QUỐC ---
   HANEDA: "HND", "HANEDA-TOKYO, JAPAN": "HND", "HANEDA-TOKYO": "HND",
   NARITA: "NRT", "NARITA-TOKYO": "NRT",
   OSAKA: "KIX", KANSAI: "KIX", NAGOYA: "NGO", FUKUOKA: "FUK", SAPPORO: "CTS", OKINAWA: "OKA",
   SEOUL: "ICN", INCHEON: "ICN", ANAA: "ICN", GIMPO: "GMP", BUSAN: "PUS", DAEGU: "TAE", JEJU: "CJU",
 
-  // --- CHÂU ÂU, TRUNG ĐÔNG, NAM Á, CHÂU ÚC, MỸ ---
   COPENHAGEN: "CPH", KOBENHAVN: "CPH", MUENCHEN: "MUC", MUNICH: "MUC",
   PARIS: "CDG", FRANKFURT: "FRA", LONDON: "LHR", AMSTERDAM: "AMS",
   ASHKHABAD: "ASB", ASHGABAT: "ASB", MOSCOW: "SVO", BARNAUL: "BAX", NOVOSIBIRSK: "OVB",
@@ -199,7 +184,6 @@ const IATA_MAP = {
 
 const SORTED_IATA_KEYS = Object.keys(IATA_MAP).sort((a, b) => b.length - a.length);
 
-// Hàm chuẩn hóa số hiệu chuyến bay (Xử lý lỗi dính tiền tố "00" ở chuyến hàng hóa/thuê chuyến như 00VHLLJ, 00VI8114)
 function normalizeFlightNumber(rawFlt = "") {
   let clean = (rawFlt || "").replace(/\s+/g, "").toUpperCase();
   if (clean.startsWith("00") && clean.length > 4) {
@@ -208,7 +192,6 @@ function normalizeFlightNumber(rawFlt = "") {
   return clean;
 }
 
-// Hàm chuyển đổi sang mã IATA 3 chữ cái (Phân biệt chính xác Tokyo Narita NRT vs Haneda HND theo số hiệu chuyến bay)
 function toIATA(name = "", flightNo = "") {
   if (!name) return "";
   let clean = name
@@ -223,7 +206,6 @@ function toIATA(name = "", flightNo = "") {
 
   const cleanFlt = normalizeFlightNumber(flightNo);
 
-  // 1. Xử lý chuyên biệt cho TOKYO / TYO / HND / NRT
   if (clean.includes("NARITA") || clean === "NRT") {
     return "NRT";
   }
@@ -231,25 +213,20 @@ function toIATA(name = "", flightNo = "") {
     return "HND";
   }
   if (clean.includes("TOKYO") || clean === "TYO" || clean === "HND") {
-    // Nếu số hiệu chuyến bay nằm trong danh sách bay Haneda (NH892, JL070, VJ820...) -> HND
     if (TOKYO_HANEDA_FLIGHTS.has(cleanFlt)) {
       return "HND";
     }
-    // Ngược lại (NH834, JL750, VN306, VN307, VJ822...) -> Thực tế hạ cánh tại Narita (NRT)
     return "NRT";
   }
 
-  // 2. Nếu bản thân đã là mã IATA 3 chữ cái chuẩn
   if (clean.length === 3 && /^[A-Z]{3}$/.test(clean)) {
     return clean;
   }
 
-  // 3. Khớp chính xác trong từ điển
   if (IATA_MAP[clean]) {
     return IATA_MAP[clean];
   }
 
-  // 4. Khớp theo từ khóa ưu tiên chuỗi dài
   for (const key of SORTED_IATA_KEYS) {
     const cleanKey = key.replace(/[-_.,]/g, " ");
     if (clean === cleanKey || clean.includes(cleanKey) || cleanKey.includes(clean)) {
@@ -326,7 +303,29 @@ export default function FlightDashboard() {
   const [filterAirline, setFilterAirline] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Lắng nghe dữ liệu từ 2 bản ghi gộp (Chỉ tốn 2 lượt Đọc!)
+  // 1. TỰ ĐỘNG CÀO DỮ LIỆU KHI CHUYỂN SANG BẤT KỲ NGÀY NÀO (KỂ CẢ NGÀY MAI 27-NOV)
+  useEffect(() => {
+    const autoFetchSelectedDate = async () => {
+      try {
+        await fetch(`/api/sync?date=${filterDate}`);
+      } catch (e) {}
+    };
+    autoFetchSelectedDate();
+  }, [filterDate]);
+
+  // 2. Tự động kiểm tra làm mới ngầm mỗi 3 phút
+  useEffect(() => {
+    const autoSyncFR24 = async () => {
+      try {
+        await fetch(`/api/sync-fr24?date=${filterDate}`);
+      } catch (e) {}
+    };
+    autoSyncFR24();
+    const fr24Timer = setInterval(autoSyncFR24, 180000);
+    return () => clearInterval(fr24Timer);
+  }, [filterDate]);
+
+  // 3. Lắng nghe dữ liệu thời gian thực từ 2 bản ghi gộp của ca trực
   useEffect(() => {
     setLoading(true);
     let day1Flights = [];
@@ -335,7 +334,7 @@ export default function FlightDashboard() {
     const processAndCombine = () => {
       const rawList = [...day1Flights, ...day2Flights];
 
-      // Áp dụng ca trực 03:00 -> 03:00+ hôm sau
+      // Áp dụng ca trực 03:00 ngày D -> trước 03:00 ngày D+1
       const opDayFlights = rawList.filter((f) => {
         const st = f.st || "";
         if (f.date === filterDate) {
@@ -408,6 +407,7 @@ export default function FlightDashboard() {
         return true;
       });
 
+      // Sắp xếp theo ca trực: 03:00 -> 23:59 rồi đến 00:00 -> 02:59(+1)
       finalList.sort((a, b) => {
         const getWeight = (item) => {
           const [h, m] = (item.st || "00:00").split(":").map(Number);
@@ -640,7 +640,7 @@ export default function FlightDashboard() {
           <input
             type="text"
             className="form-control"
-            placeholder="Mã chuyến, IATA (NRT, HND, PKZ, LJG)..."
+            placeholder="Mã chuyến, IATA (HAN, SFO, BKK)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />

@@ -43,7 +43,6 @@ function getNextDayStr(dateStr) {
   return date.toISOString().split("T")[0];
 }
 
-// Tính ngày khai thác hiện tại (Nếu giờ hiện tại < 03:00 sáng thì vẫn thuộc ca trực ngày hôm trước)
 function getCurrentOperationalDate() {
   const now = new Date();
   const vnFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -142,7 +141,7 @@ async function handleSync(request) {
   try {
     const { searchParams } = new URL(request.url);
 
-    // Ngày khai thác D (03:00 ngày D) và Ngày kế tiếp D+1 (00:00 -> 02:59 ngày D+1)
+    // Quét trọn vẹn cả 24h của Ngày D (ví dụ 26-Nov) VÀ trọn vẹn 24h của Ngày D+1 (ví dụ 27-Nov)
     const opDate = searchParams.get("date") || getCurrentOperationalDate();
     const nextDate = getNextDayStr(opDate);
 
@@ -172,18 +171,16 @@ async function handleSync(request) {
     const viewStateGenerator = getInputValue(initHtml, "__VIEWSTATEGENERATOR") || "CA0B0334";
     const eventValidation = getInputValue(initHtml, "__EVENTVALIDATION");
 
-    // Danh sách quét:
-    // - Ngày D (opDate): Quét cả ngày (0000-2359) để lấy toàn bộ chuyến từ 03:00 đến 23:59
-    // - Ngày D+1 (nextDate): Chỉ cần quét khung giờ rạng sáng "0000-0359" (00:00 - 04:00) siêu nhẹ để lấy các chuyến 00:00 -> 02:59+!
+    // Quét toàn bộ 24h ("0000-2359") cho cả ngày D (26-Nov) và ngày D+1 (27-Nov)
     const scanJobs = [
       { scanDate: opDate, timeRange: "0000-2359", station: "DOM", trip: "D" },
       { scanDate: opDate, timeRange: "0000-2359", station: "DOM", trip: "A" },
       { scanDate: opDate, timeRange: "0000-2359", station: "INT", trip: "D" },
       { scanDate: opDate, timeRange: "0000-2359", station: "INT", trip: "A" },
-      { scanDate: nextDate, timeRange: "0000-0359", station: "DOM", trip: "D" },
-      { scanDate: nextDate, timeRange: "0000-0359", station: "DOM", trip: "A" },
-      { scanDate: nextDate, timeRange: "0000-0359", station: "INT", trip: "D" },
-      { scanDate: nextDate, timeRange: "0000-0359", station: "INT", trip: "A" },
+      { scanDate: nextDate, timeRange: "0000-2359", station: "DOM", trip: "D" },
+      { scanDate: nextDate, timeRange: "0000-2359", station: "DOM", trip: "A" },
+      { scanDate: nextDate, timeRange: "0000-2359", station: "INT", trip: "D" },
+      { scanDate: nextDate, timeRange: "0000-2359", station: "INT", trip: "A" },
     ];
 
     const jobResults = await Promise.all(
@@ -244,11 +241,6 @@ async function handleSync(request) {
         const item = parsed[idx];
         const st = (item.ST || "").trim();
 
-        // Đối với ngày D+1, chỉ lấy các chuyến có STD/STA từ 00:00 đến 02:59 (trước 03:00)
-        if (job.scanDate === nextDate && st >= "03:00") {
-          continue;
-        }
-
         const rawFlt = (item.FltNo || "").trim();
         const cleanFlt = rawFlt.replace(/\s+/g, "").toUpperCase();
         const timeKey = st.replace(/[^0-9]/g, "");
@@ -296,7 +288,7 @@ async function handleSync(request) {
       }
     }
 
-    // Lưu gộp vào Firebase (1 lượt Ghi cho ngày D và 1 lượt Ghi cho rạng sáng ngày D+1)
+    // Lưu trọn vẹn cả 2 ngày D (26-Nov) và D+1 (27-Nov) vào Firebase
     await Promise.all([
       setDoc(
         day1Ref,
@@ -322,7 +314,7 @@ async function handleSync(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã gộp lưu ca trực ${opDate} (${totalUpdatedDay1} chuyến ngày ${opDate} + ${totalUpdatedDay2} chuyến rạng sáng ${nextDate})!`,
+      message: `Đã gộp lưu đầy đủ 24h cho cả 2 ngày (${totalUpdatedDay1} chuyến ngày ${opDate} + ${totalUpdatedDay2} chuyến ngày ${nextDate})!`,
       opDate,
       nextDate,
       duration: `${(Date.now() - startTime) / 1000}s`,
